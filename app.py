@@ -13,8 +13,8 @@ st.write("Please ensure your uploaded Excel or CSV file follows this exact struc
 format_data = {
     "Column A": ["Project Name (or empty)", "Project Name (or empty)"],
     "Column B": ["Task Name", "Task Name"],
-    "Column C": ["Start Date (DD-Mon-YY)", "Start Date (DD-Mon-YY)"],
-    "Column D": ["Finish Date (DD-Mon-YY)", "Finish Date (DD-Mon-YY)"]
+    "Column C": ["Start Date (DD-Mon-YY)", "Start Date (DD-MM-YY)"],
+    "Column D": ["Finish Date (DD-Mon-YY)", "Finish Date (DD-MM-YY)"]
 }
 st.table(pd.DataFrame(format_data))
 
