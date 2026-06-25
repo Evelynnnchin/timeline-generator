@@ -1,12 +1,11 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
-import datetime # <-- [NEW] This lets Python read the current date!
 
 # 1. Page Setup
 st.set_page_config(page_title="Department Timeline Generator", layout="wide")
 st.title("📊 Project Timeline Generator")
-st.write("Enter your project details and upload the schedule to generate a timeline.")
+st.write("Enter your project details and upload the schedule to generate an interactive timeline.")
 
 # 2. User Inputs
 project_title = st.text_input("📝 Enter Project Title:", value="Official Project Schedule")
@@ -28,9 +27,11 @@ if uploaded_file is not None:
             "PMF,Delivery", "Design", "General"
         ]
 
+        # Added custom hover data so the interactive tooltips look super clean!
         fig = px.timeline(
             df, x_start="Start", x_end="Finish", y="Task", color="Task",
-            title=f"<b>{project_title}</b>" 
+            title=f"<b>{project_title}</b>",
+            hover_data={"Task": True, "Start": "|%B %d, %Y", "Finish": "|%B %d, %Y"} 
         )
 
         min_date = df['Start'].min().replace(day=1)
@@ -57,26 +58,28 @@ if uploaded_file is not None:
             height=600 
         )
 
-        # Draw the background grid
         for dt in all_months:
             if dt.month == 1:
                 fig.add_vline(x=dt, line_width=2, line_color="black", layer="below")
             else:
                 fig.add_vline(x=dt, line_width=1, line_color="#E5E5E5", layer="below")
 
-        # 5. Add the "TODAY" Line [NEW]
-        # This draws a bright red, dashed line with a label right at the current date
-        today = datetime.date.today()
+        # 5. Add "Time Now" Line (Using your exact styling!)
+        # We grab the current time and format it as a standard date string so Plotly doesn't crash
+        today_str = pd.Timestamp.now().strftime('%Y-%m-%d')
+        
         fig.add_vline(
-            x=today, 
-            line_width=3, 
-            line_dash="dash", 
-            line_color="red", 
-            annotation_text=" 📍 TODAY", 
-            annotation_position="top right"
+            x=today_str,
+            line_width=3,
+            line_dash="dash",
+            line_color="red",
+            annotation_text="Time Now",
+            annotation_position="top right",
+            annotation_font_color="red",
+            annotation_font_weight="bold"
         )
 
-        # 6. Display the chart
+        # 6. Display the interactive chart!
         st.plotly_chart(fig, use_container_width=True)
 
     except Exception as e:
