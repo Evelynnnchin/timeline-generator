@@ -74,7 +74,7 @@ if uploaded_file is not None:
             line_dash="dash",
             line_color="red",
             annotation_text="Time Now",
-            annotation_position="top right",
+            annotation_position="top",
             annotation_font_color="red",
             annotation_font_weight="bold"
         )
