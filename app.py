@@ -270,52 +270,31 @@ if uploaded_file is not None:
                 line_width=0
             )
 
-     # =========================
-# LAYOUT
-# =========================
+        # =========================
+        # LAYOUT
+        # =========================
+        fig.update_layout(
+            xaxis=dict(
+                title="",
+                tickmode="array",
+                tickvals=tick_vals,
+                ticktext=tick_text,
+                tickangle=0,
+                showgrid=True,
+                gridcolor="rgba(0,0,0,0.1)",
+                gridwidth=1
+            ),
+            showlegend=True,
+            legend_title="Project Phases",
+            height=chart_height,
+            margin=dict(
+                t=50,
+                b=50,
+                l=10,
+                r=50
+            )
+        )
 
-# Top axis = years
-year_ticks = pd.date_range(
-    start=min_date,
-    end=max_date,
-    freq="YS"
-)
-
-fig.update_layout(
-    xaxis=dict(
-        title="",
-        tickmode="array",
-        tickvals=tick_vals,
-        ticktext=tick_text,
-        tickangle=0,
-        showgrid=True,
-        gridcolor="rgba(0,0,0,0.1)",
-        gridwidth=1,
-        side="bottom"
-    ),
-
-    # TOP X-AXIS
-    xaxis2=dict(
-        overlaying="x",
-        side="top",
-        tickmode="array",
-        tickvals=year_ticks,
-        ticktext=[str(y.year) for y in year_ticks],
-        tickangle=0,
-        showgrid=False,
-        matches="x"
-    ),
-
-    showlegend=True,
-    legend_title="Project Phases",
-    height=chart_height,
-    margin=dict(
-        t=80,   # larger top margin for year axis
-        b=50,
-        l=10,
-        r=50
-    )
-)
         # =========================
         # YEAR LINES
         # =========================
@@ -341,7 +320,7 @@ fig.update_layout(
             line_dash="dash",
             line_color="red",
             annotation_text="📍 TODAY",
-            annotation_position="top",
+            annotation_position="top right",
             annotation_font_color="red",
             layer="above"
         )
