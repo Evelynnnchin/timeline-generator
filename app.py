@@ -6,7 +6,19 @@ import numpy as np
 # 1. Page Setup
 st.set_page_config(page_title="Master Timeline Generator", layout="wide")
 st.title("📊 Master Project Timeline")
-st.write("Upload your formatted schedule (.xlsx or .csv) to generate a combined, color-coded timeline.")
+
+# [NEW] Instructions Table
+st.write("### 📂 Required File Format")
+st.write("Please ensure your uploaded Excel or CSV file follows this exact structure for the timeline to generate correctly:")
+format_data = {
+    "Column A": ["Project Name (or empty)", "Project Name (or empty)"],
+    "Column B": ["Task Name", "Task Name"],
+    "Column C": ["Start Date (DD-Mon-YY)", "Start Date (DD-Mon-YY)"],
+    "Column D": ["Finish Date (DD-Mon-YY)", "Finish Date (DD-Mon-YY)"]
+}
+st.table(pd.DataFrame(format_data))
+
+st.write("---")
 
 # --- PERFORMANCE CACHE ---
 @st.cache_data
@@ -40,7 +52,7 @@ def load_and_clean_data(file):
     return df_clean
 
 # 2. File Uploader
-uploaded_file = st.file_uploader("📂 Upload Schedule", type=['xlsx', 'csv'])
+uploaded_file = st.file_uploader("📂 Upload Schedule (.xlsx or .csv)", type=['xlsx', 'csv'])
 
 if uploaded_file is not None:
     try:
@@ -55,7 +67,6 @@ if uploaded_file is not None:
         
         unique_tasks = df_clean['Display_Task'].unique().tolist()
         
-        # [NEW] Added tickfont to make Y-Axis labels solid black and slightly larger
         fig.update_yaxes(
             autorange="reversed", 
             title="",
@@ -64,7 +75,6 @@ if uploaded_file is not None:
             tickfont=dict(color="black", size=13) 
         )
 
-        # 3. Dynamic X-Axis 
         min_date = df_clean['Start'].min().replace(day=1)
         max_date = df_clean['Finish'].max()
         all_months = pd.date_range(start=min_date, end=max_date, freq='MS')
@@ -78,20 +88,16 @@ if uploaded_file is not None:
             else:
                 tick_text.append(f"{month_map[dt.month]}")
 
-        # 4. Dynamic Height
         num_tasks = len(unique_tasks)
         chart_height = max(600, num_tasks * 25) 
 
-        # --- DRAW PROJECT BACKGROUND BANDS [UPDATED] ---
         unique_projects = df_clean['Project'].unique().tolist()
-        
-        # [NEW] Richer, distinct colors with higher opacity (0.2 to 0.3)
         bg_colors = [
-            "rgba(100, 149, 237, 0.2)",   # Cornflower Blue
-            "rgba(143, 188, 143, 0.25)",  # Dark Sea Green
-            "rgba(244, 164, 96, 0.25)",   # Sandy Brown
-            "rgba(216, 191, 216, 0.3)",   # Thistle Purple
-            "rgba(255, 160, 122, 0.25)"   # Light Salmon
+            "rgba(100, 149, 237, 0.2)",
+            "rgba(143, 188, 143, 0.25)",
+            "rgba(244, 164, 96, 0.25)",
+            "rgba(216, 191, 216, 0.3)",
+            "rgba(255, 160, 122, 0.25)"
         ]
         
         for i, proj in enumerate(unique_projects):
@@ -110,7 +116,6 @@ if uploaded_file is not None:
                 line_width=0
             )
 
-        # 5. Speed Optimized Layout & Grid Lines
         fig.update_layout(
             xaxis=dict(
                 title="", tickmode='array', tickvals=tick_vals,
@@ -127,15 +132,13 @@ if uploaded_file is not None:
             if dt.month == 1:
                 fig.add_vline(x=dt, line_width=2, line_color="black", layer="below")
 
-        # 6. The "TODAY" Line
         today_str = pd.Timestamp.now().strftime('%Y-%m-%d')
         fig.add_vline(
             x=today_str, line_width=3, line_dash="dash", line_color="red",
-            annotation_text=" 📍 TODAY", annotation_position="top",
+            annotation_text=" 📍 TODAY", annotation_position="top right",
             annotation_font_color="red", annotation_font_weight="bold", layer="above"
         )
 
-        # --- DISPLAY ---
         st.plotly_chart(fig, use_container_width=True)
 
     except Exception as e:
