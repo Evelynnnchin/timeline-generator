@@ -47,21 +47,21 @@ if uploaded_file is not None:
         df_clean = load_and_clean_data(uploaded_file)
 
         # --- GENERATE THE CHART ---
-        
-        # 1. Color set to "Task" so all matching tasks share the same color globally
         fig = px.timeline(
             df_clean, x_start="Start", x_end="Finish", y="Display_Task", color="Task", 
             title="<b>Master Department Schedule: Grand View</b>",
             hover_data={"Display_Task": False, "Task": True, "Project": True, "Start": "|%B %d, %Y", "Finish": "|%B %d, %Y"} 
         )
         
-        # We explicitly map the exact order of the Y-axis so our background drawing math works perfectly
         unique_tasks = df_clean['Display_Task'].unique().tolist()
+        
+        # [NEW] Added tickfont to make Y-Axis labels solid black and slightly larger
         fig.update_yaxes(
             autorange="reversed", 
             title="",
             categoryorder="array",
-            categoryarray=unique_tasks
+            categoryarray=unique_tasks,
+            tickfont=dict(color="black", size=13) 
         )
 
         # 3. Dynamic X-Axis 
@@ -82,29 +82,26 @@ if uploaded_file is not None:
         num_tasks = len(unique_tasks)
         chart_height = max(600, num_tasks * 25) 
 
-        # --- DRAW PROJECT BACKGROUND BANDS [NEW] ---
+        # --- DRAW PROJECT BACKGROUND BANDS [UPDATED] ---
         unique_projects = df_clean['Project'].unique().tolist()
         
-        # A professional palette of very faint background colors to separate projects
+        # [NEW] Richer, distinct colors with higher opacity (0.2 to 0.3)
         bg_colors = [
-            "rgba(30, 144, 255, 0.08)",   # Faint Blue
-            "rgba(60, 179, 113, 0.08)",   # Faint Green
-            "rgba(255, 165, 0, 0.08)",    # Faint Orange
-            "rgba(238, 130, 238, 0.08)",  # Faint Violet
-            "rgba(255, 99, 71, 0.08)"     # Faint Red
+            "rgba(100, 149, 237, 0.2)",   # Cornflower Blue
+            "rgba(143, 188, 143, 0.25)",  # Dark Sea Green
+            "rgba(244, 164, 96, 0.25)",   # Sandy Brown
+            "rgba(216, 191, 216, 0.3)",   # Thistle Purple
+            "rgba(255, 160, 122, 0.25)"   # Light Salmon
         ]
         
-        # Loop through each project and draw a horizontal box behind its tasks
         for i, proj in enumerate(unique_projects):
             proj_tasks = df_clean[df_clean['Project'] == proj]['Display_Task'].unique().tolist()
             if not proj_tasks:
                 continue
                 
-            # Find exactly where this project starts and ends on the Y-Axis
             first_idx = unique_tasks.index(proj_tasks[0])
             last_idx = unique_tasks.index(proj_tasks[-1])
             
-            # Draw the box slightly above the first task (-0.5) and slightly below the last (+0.5)
             fig.add_hrect(
                 y0=first_idx - 0.5, 
                 y1=last_idx + 0.5, 
