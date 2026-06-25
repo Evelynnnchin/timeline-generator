@@ -6,66 +6,56 @@ import numpy as np
 # 1. Page Setup
 st.set_page_config(page_title="Master Timeline Generator", layout="wide")
 st.title("📊 Master Project Timeline")
-st.write("Upload your raw grouped schedule to generate a stacked timeline.")
+st.write("Upload your raw grouped schedule to generate a single, combined timeline.")
 
-# 2. File Uploader (Now accepts both Excel and CSV!)
+# 2. File Uploader
 uploaded_file = st.file_uploader("📂 Upload Schedule (.xlsx or .csv)", type=['xlsx', 'csv'])
 
 if uploaded_file is not None:
     try:
-        # --- THE AUTO-CLEANER MAGIC ---
+        # --- AUTO-CLEANER MAGIC (WITH BUG FIXES) ---
         
-        # Read the file blindly without looking for standard column headers
+        # Read the file explicitly as strings to prevent float64 errors
         if uploaded_file.name.endswith('.csv'):
-            df_raw = pd.read_csv(uploaded_file, header=None)
+            df_raw = pd.read_csv(uploaded_file, header=None, dtype=str)
         else:
-            df_raw = pd.read_excel(uploaded_file, header=None)
+            df_raw = pd.read_excel(uploaded_file, header=None, dtype=str)
 
-        # Create a blank column at the end to hold our Project Names
         df_raw['Project'] = np.nan
         
-        # DETECT HEADERS: We assume a row is a "Project Header" if the Task (Col 1) 
-        # and Start Date (Col 3) are empty, but the first column has text.
+        # DETECT HEADERS
         header_mask = df_raw[1].isna() & df_raw[3].isna() & df_raw[0].notna()
-        
-        # Move the project names into our new column
         df_raw.loc[header_mask, 'Project'] = df_raw[0]
-        
-        # Forward-fill the project name down to all the task rows below it!
         df_raw['Project'] = df_raw['Project'].ffill()
         
-        # Delete the standalone header rows now that the tasks are tagged
         df = df_raw[~header_mask].copy()
-        
-        # Keep only the first 6 columns (to ignore stray data) and name them
         df = df.iloc[:, [0, 1, 2, 3, 4, 5]]
         df.columns = ['ID', 'Task', 'Duration', 'Start', 'Finish', 'Project']
         
-        # Convert to dates. If a row has text (like table headers) or blanks, it turns to NaT (Not a Time)
+        # CRITICAL BUG FIX: Force object type so Plotly can read the text
+        df['Project'] = df['Project'].astype(object)
+        df['Task'] = df['Task'].astype(object)
+        
         df['Start'] = pd.to_datetime(df['Start'], errors='coerce')
         df['Finish'] = pd.to_datetime(df['Finish'], errors='coerce')
-        
-        # Drop any invalid rows to leave us with perfectly clean task data
         df = df.dropna(subset=['Start', 'Finish'])
 
+        # Create a unique Y-axis label so tasks from different projects do not overlap
+        df['Display_Task'] = df['Project'].astype(str) + " : " + df['Task'].astype(str)
 
-        # --- GENERATE THE CHART ---
+        # --- GENERATE SINGLE GRAND VIEW CHART ---
         
-        # Notice facet_row="Project". This is the magic that creates the visual headers!
+        # facet_row is removed to put everything on ONE big plot
         fig = px.timeline(
-            df, x_start="Start", x_end="Finish", y="Task", color="Project",
-            facet_row="Project", 
-            hover_data={"Task": True, "Start": "|%B %d, %Y", "Finish": "|%B %d, %Y"} 
+            df, x_start="Start", x_end="Finish", y="Display_Task", color="Project",
+            title="<b>Master Department Schedule: Grand View</b>",
+            hover_data={"Display_Task": False, "Task": True, "Project": True, "Start": "|%B %d, %Y", "Finish": "|%B %d, %Y"} 
         )
-
-        # 1. Clean up the facet headers (Removes the ugly default "Project=" text)
-        fig.for_each_annotation(lambda a: a.update(text=a.text.split("=")[-1], font=dict(size=16, weight="bold")))
         
-        # 2. Universal Task Sorting: This ensures every project automatically lists its tasks
-        # from top to bottom exactly as they appear in the Excel sheet!
-        fig.update_yaxes(matches=None, autorange="reversed", title="", showticklabels=True)
+        # Universal Task Sorting from top to bottom
+        fig.update_yaxes(autorange="reversed", title="")
 
-        # 3. Dynamic X-Axis (Month Letters & Centered Years)
+        # 3. Dynamic X-Axis
         min_date = df['Start'].min().replace(day=1)
         max_date = df['Finish'].max()
         all_months = pd.date_range(start=min_date, end=max_date, freq='MS')
@@ -79,19 +69,20 @@ if uploaded_file is not None:
             else:
                 tick_text.append(f"{month_map[dt.month]}")
 
-        # 4. Dynamic Height: Automatically stretches the chart so things don't get 
-        # squished if someone uploads a master file with 20 projects.
-        num_projects = len(df['Project'].unique())
-        chart_height = max(600, num_projects * 300) 
+        # 4. Dynamic Height
+        # Scales smoothly based on the total number of tasks
+        num_rows = len(df['Display_Task'].unique())
+        chart_height = max(600, num_rows * 25) 
 
         fig.update_layout(
             xaxis=dict(
                 title="", tickmode='array', tickvals=tick_vals,
                 ticktext=tick_text, tickangle=0, showgrid=False
             ),
-            showlegend=False, 
+            showlegend=True, 
+            legend_title="Projects",
             height=chart_height,
-            margin=dict(t=50, b=50, l=10, r=50) 
+            margin=dict(t=80, b=50, l=10, r=50) 
         )
 
         # 5. Background Grid Lines
