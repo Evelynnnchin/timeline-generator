@@ -131,7 +131,7 @@ if uploaded_file is not None:
         today_str = pd.Timestamp.now().strftime('%Y-%m-%d')
         fig.add_vline(
             x=today_str, line_width=3, line_dash="dash", line_color="red",
-            annotation_text=" 📍 TODAY", annotation_position="top right",
+            annotation_text=" 📍 TODAY", annotation_position="top",
             annotation_font_color="red", annotation_font_weight="bold", layer="above"
         )
 
