@@ -1,4 +1,3 @@
-```python
 import streamlit as st
 import pandas as pd
 import plotly.express as px
@@ -46,13 +45,14 @@ if uploaded_file is not None:
             st.error(
                 f"Missing required columns: {', '.join(missing_cols)}"
             )
+            st.write("Detected columns:")
+            st.write(list(df.columns))
             st.stop()
 
         # =========================
         # DATA CLEANING
         # =========================
 
-        # Convert dates
         df["Start"] = pd.to_datetime(
             df["Start"],
             errors="coerce"
@@ -63,7 +63,7 @@ if uploaded_file is not None:
             errors="coerce"
         )
 
-        # Remove separator/header rows
+        # Remove separator rows
         df = df.dropna(
             subset=["Start", "Finish"]
         )
@@ -73,11 +73,8 @@ if uploaded_file is not None:
             subset=["Task"]
         )
 
-        # Preserve original order
-        df["Task_Order"] = range(len(df))
-
         # =========================
-        # TIMELINE CHART
+        # CREATE TIMELINE
         # =========================
 
         fig = px.timeline(
@@ -95,10 +92,7 @@ if uploaded_file is not None:
             }
         )
 
-        # =========================
-        # CLEAN FACET TITLES
-        # =========================
-
+        # Clean facet titles
         fig.for_each_annotation(
             lambda a: a.update(
                 text=a.text.split("=")[-1],
@@ -106,10 +100,7 @@ if uploaded_file is not None:
             )
         )
 
-        # =========================
-        # Y-AXIS FORMAT
-        # =========================
-
+        # Reverse task order
         fig.update_yaxes(
             matches=None,
             autorange="reversed",
@@ -118,7 +109,7 @@ if uploaded_file is not None:
         )
 
         # =========================
-        # X-AXIS (MONTH LETTERS)
+        # X AXIS
         # =========================
 
         min_date = df["Start"].min().replace(day=1)
@@ -152,7 +143,6 @@ if uploaded_file is not None:
 
             tick_vals.append(dt)
 
-            # Show year under June
             if dt.month == 6:
                 tick_text.append(
                     f"{month_map[dt.month]}<br><b>{dt.year}</b>"
@@ -163,7 +153,7 @@ if uploaded_file is not None:
                 )
 
         # =========================
-        # CHART HEIGHT
+        # HEIGHT
         # =========================
 
         num_projects = df["Project"].nunique()
@@ -197,7 +187,7 @@ if uploaded_file is not None:
         )
 
         # =========================
-        # MONTH GRIDLINES
+        # GRIDLINES
         # =========================
 
         for dt in all_months:
@@ -232,7 +222,7 @@ if uploaded_file is not None:
             line_dash="dash",
             line_color="red",
             annotation_text="📍 TODAY",
-            annotation_position="top"
+            annotation_position="top right"
         )
 
         # =========================
@@ -249,7 +239,4 @@ if uploaded_file is not None:
         )
 
     except Exception as e:
-        st.error(
-            f"Error processing file: {e}"
-        )
-```
+        st.error(f"Error processing file: {e}")
