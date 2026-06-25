@@ -1,3 +1,4 @@
+```python
 import streamlit as st
 import pandas as pd
 import plotly.express as px
@@ -11,14 +12,14 @@ st.set_page_config(
 )
 
 st.title("📊 Master Project Timeline")
-st.write("Upload your schedule file (.xlsx or .csv)")
+st.write("Upload an Excel schedule to generate a master timeline.")
 
 # =========================
-# FILE UPLOAD
+# FILE UPLOADER
 # =========================
 uploaded_file = st.file_uploader(
-    "📂 Upload Schedule",
-    type=["xlsx", "csv"]
+    "📂 Upload Schedule (.xlsx)",
+    type=["xlsx"]
 )
 
 if uploaded_file is not None:
@@ -26,20 +27,20 @@ if uploaded_file is not None:
     try:
 
         # =========================
-        # READ FILE
+        # READ EXCEL
         # =========================
-        if uploaded_file.name.endswith(".csv"):
-            df = pd.read_csv(uploaded_file)
-        else:
-            df = pd.read_excel(uploaded_file)
+        df = pd.read_excel(uploaded_file)
 
         # Clean column names
         df.columns = df.columns.str.strip()
 
-        # Ensure required columns exist
+        # Check required columns
         required_cols = ["Project", "Task", "Start", "Finish"]
 
-        missing_cols = [c for c in required_cols if c not in df.columns]
+        missing_cols = [
+            col for col in required_cols
+            if col not in df.columns
+        ]
 
         if missing_cols:
             st.error(
@@ -48,7 +49,7 @@ if uploaded_file is not None:
             st.stop()
 
         # =========================
-        # CLEAN DATA
+        # DATA CLEANING
         # =========================
 
         # Convert dates
@@ -62,7 +63,7 @@ if uploaded_file is not None:
             errors="coerce"
         )
 
-        # Remove project header rows
+        # Remove separator/header rows
         df = df.dropna(
             subset=["Start", "Finish"]
         )
@@ -72,13 +73,11 @@ if uploaded_file is not None:
             subset=["Task"]
         )
 
-        # Sort by project then start date
-        df = df.sort_values(
-            ["Project", "Start"]
-        )
+        # Preserve original order
+        df["Task_Order"] = range(len(df))
 
         # =========================
-        # CREATE TIMELINE
+        # TIMELINE CHART
         # =========================
 
         fig = px.timeline(
@@ -97,28 +96,29 @@ if uploaded_file is not None:
         )
 
         # =========================
-        # FORMAT FACET TITLES
+        # CLEAN FACET TITLES
         # =========================
 
         fig.for_each_annotation(
             lambda a: a.update(
                 text=a.text.split("=")[-1],
-                font=dict(size=14)
+                font=dict(size=16)
             )
         )
 
         # =========================
-        # Y AXIS
+        # Y-AXIS FORMAT
         # =========================
 
         fig.update_yaxes(
-            autorange="reversed",
             matches=None,
-            title=""
+            autorange="reversed",
+            title="",
+            showticklabels=True
         )
 
         # =========================
-        # X AXIS MONTH LABELS
+        # X-AXIS (MONTH LETTERS)
         # =========================
 
         min_date = df["Start"].min().replace(day=1)
@@ -152,6 +152,7 @@ if uploaded_file is not None:
 
             tick_vals.append(dt)
 
+            # Show year under June
             if dt.month == 6:
                 tick_text.append(
                     f"{month_map[dt.month]}<br><b>{dt.year}</b>"
@@ -168,7 +169,7 @@ if uploaded_file is not None:
         num_projects = df["Project"].nunique()
 
         chart_height = max(
-            700,
+            800,
             num_projects * 250
         )
 
@@ -177,13 +178,13 @@ if uploaded_file is not None:
         # =========================
 
         fig.update_layout(
-            height=chart_height,
             showlegend=False,
+            height=chart_height,
             margin=dict(
-                l=20,
-                r=20,
                 t=50,
-                b=50
+                b=50,
+                l=20,
+                r=20
             ),
             xaxis=dict(
                 title="",
@@ -202,13 +203,16 @@ if uploaded_file is not None:
         for dt in all_months:
 
             if dt.month == 1:
+
                 fig.add_vline(
                     x=dt,
                     line_width=2,
                     line_color="black",
                     layer="below"
                 )
+
             else:
+
                 fig.add_vline(
                     x=dt,
                     line_width=1,
@@ -228,7 +232,7 @@ if uploaded_file is not None:
             line_dash="dash",
             line_color="red",
             annotation_text="📍 TODAY",
-            annotation_position="top right"
+            annotation_position="top"
         )
 
         # =========================
@@ -248,3 +252,4 @@ if uploaded_file is not None:
         st.error(
             f"Error processing file: {e}"
         )
+```
