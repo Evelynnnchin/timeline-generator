@@ -9,35 +9,43 @@ st.title("📊 Master Project Timeline")
 st.write("Upload your formatted schedule (.xlsx or .csv) to generate a single, combined timeline.")
 
 # --- PERFORMANCE CACHE ---
-# This decorator tells Streamlit to remember the parsed data so it doesn't recalculate 
-# everything every time you interact with the chart!
 @st.cache_data
 def load_and_clean_data(file):
+    # Read without forcing string type so Pandas can naturally read Excel dates
     if file.name.endswith('.csv'):
-        df_raw = pd.read_csv(file, header=None, dtype=str)
+        df_raw = pd.read_csv(file, header=None)
     else:
-        df_raw = pd.read_excel(file, header=None, dtype=str)
+        df_raw = pd.read_excel(file, header=None)
 
-    df_raw[0] = df_raw[0].replace(r'^\s*$', np.nan, regex=True)
-    df_raw[1] = df_raw[1].replace(r'^\s*$', np.nan, regex=True)
+    # Clean up empty spaces in the first two columns safely
+    df_raw[0] = df_raw[0].astype(str).replace(r'^\s*$', np.nan, regex=True).replace('nan', np.nan)
+    df_raw[1] = df_raw[1].astype(str).replace(r'^\s*$', np.nan, regex=True).replace('nan', np.nan)
 
+    # Drop the actual text header row if it is in the file
     if str(df_raw.iloc[0, 0]).strip().lower() == 'project':
         df_raw = df_raw.iloc[1:].reset_index(drop=True)
 
-    df_raw['Extracted_Project'] = df_raw[0]
-    df_raw['Extracted_Project'] = df_raw['Extracted_Project'].ffill()
+    # Extract and forward-fill the Project names
+    df_raw['Extracted_Project'] = df_raw[0].ffill()
 
+    # Filter out rows that are ONLY project headers (where Task is blank)
     task_mask = df_raw[1].notna()
     df = df_raw[task_mask].copy()
 
+    # Map to our final clean format
     df_clean = pd.DataFrame()
-    df_clean['Project'] = df['Extracted_Project'].astype(object)
-    df_clean['Task'] = df[1].astype(object)
+    df_clean['Project'] = df['Extracted_Project'].astype(str)
+    df_clean['Task'] = df[1].astype(str)
+    
+    # Let Pandas natively parse the dates
     df_clean['Start'] = pd.to_datetime(df[2], errors='coerce')
     df_clean['Finish'] = pd.to_datetime(df[3], errors='coerce')
 
+    # Drop any rows where dates could not be parsed
     df_clean = df_clean.dropna(subset=['Start', 'Finish'])
-    df_clean['Display_Task'] = df_clean['Project'].astype(str) + " : " + df_clean['Task'].astype(str)
+
+    # Create a unique Y-axis label so tasks from different projects do not overlap
+    df_clean['Display_Task'] = df_clean['Project'] + " : " + df_clean['Task']
     
     return df_clean
 
@@ -49,6 +57,11 @@ if uploaded_file is not None:
         # Load data using our fast cached function
         df_clean = load_and_clean_data(uploaded_file)
 
+        # Safety Check: If the dataframe is empty after parsing, alert the user!
+        if df_clean.empty:
+            st.error("⚠️ No valid dates could be parsed. Please check that your Start and Finish columns contain valid date formats.")
+            st.stop()
+
         # --- GENERATE THE CHART ---
         fig = px.timeline(
             df_clean, x_start="Start", x_end="Finish", y="Display_Task", color="Project",
@@ -56,6 +69,7 @@ if uploaded_file is not None:
             hover_data={"Display_Task": False, "Task": True, "Project": True, "Start": "|%B %d, %Y", "Finish": "|%B %d, %Y"}
         )
         
+        # Ensures everything lists from top to bottom
         fig.update_yaxes(autorange="reversed", title="")
 
         # X-Axis Formatting
@@ -72,6 +86,7 @@ if uploaded_file is not None:
             else:
                 tick_text.append(f"{month_map[dt.month]}")
 
+        # Automatically stretch chart height based on the number of tasks
         num_rows = len(df_clean['Display_Task'].unique())
         chart_height = max(600, num_rows * 25) 
 
@@ -80,7 +95,7 @@ if uploaded_file is not None:
             xaxis=dict(
                 title="", tickmode='array', tickvals=tick_vals,
                 ticktext=tick_text, tickangle=0, 
-                showgrid=True, gridcolor="#E5E5E5", gridwidth=1 # Plotly draws the gray lines instantly!
+                showgrid=True, gridcolor="#E5E5E5", gridwidth=1 
             ),
             showlegend=True, 
             legend_title="Projects",
@@ -88,7 +103,7 @@ if uploaded_file is not None:
             margin=dict(t=80, b=50, l=10, r=50) 
         )
 
-        # We ONLY manually draw the thick black year lines now
+        # Only manually draw the thick black year lines
         for dt in all_months:
             if dt.month == 1:
                 fig.add_vline(x=dt, line_width=2, line_color="black", layer="below")
