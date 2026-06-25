@@ -13,27 +13,34 @@ uploaded_file = st.file_uploader("📂 Upload Schedule (.xlsx or .csv)", type=['
 
 if uploaded_file is not None:
     try:
-        # --- AUTO-CLEANER MAGIC ---
+       # --- AUTO-CLEANER MAGIC (UPDATED) ---
         if uploaded_file.name.endswith('.csv'):
-            df_raw = pd.read_csv(uploaded_file, header=None)
+            df_raw = pd.read_csv(uploaded_file, header=None, dtype=str)
         else:
-            df_raw = pd.read_excel(uploaded_file, header=None)
+            df_raw = pd.read_excel(uploaded_file, header=None, dtype=str)
 
+        # Ensure the Project column is explicitly string type
         df_raw['Project'] = np.nan
-        # Identify project headers (rows where only col 0 has text)
+        
+        # Identify project headers
         header_mask = df_raw[1].isna() & df_raw[3].isna() & df_raw[0].notna()
         df_raw.loc[header_mask, 'Project'] = df_raw[0]
         df_raw['Project'] = df_raw['Project'].ffill()
         
-        # Clean data
+        # Build clean dataframe
         df = df_raw[~header_mask].copy()
+        # Keep columns based on your provided format (ID, Task, Dur, Start, Finish)
         df = df.iloc[:, [0, 1, 2, 3, 4, 5]]
         df.columns = ['ID', 'Task', 'Duration', 'Start', 'Finish', 'Project']
         
+        # Convert dates safely
         df['Start'] = pd.to_datetime(df['Start'], errors='coerce')
         df['Finish'] = pd.to_datetime(df['Finish'], errors='coerce')
+        
+        # CRITICAL: Force Project column to string to avoid dtype errors
+        df['Project'] = df['Project'].astype(str)
+        
         df = df.dropna(subset=['Start', 'Finish'])
-
         # --- GENERATE GRAND VIEW ---
         fig = px.timeline(
             df, x_start="Start", x_end="Finish", y="Task", color="Project",
