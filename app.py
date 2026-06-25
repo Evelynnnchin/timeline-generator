@@ -320,7 +320,7 @@ if uploaded_file is not None:
             line_dash="dash",
             line_color="red",
             annotation_text="📍 TODAY",
-            annotation_position="top right",
+            annotation_position="top",
             annotation_font_color="red",
             layer="above"
         )
