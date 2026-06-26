@@ -197,14 +197,20 @@ if uploaded_file is not None:
         }
 
         tick_vals = []
-        tick_text = []
+        tick_text_bottom = []
+        tick_text_top = []
 
         for dt in all_months:
             tick_vals.append(dt)
+
             if dt.month == 6:
-                tick_text.append(f"{month_map[dt.month]}<br><b>{dt.year}</b>")
+                # BOTTOM: Month on top of Year
+                tick_text_bottom.append(f"{month_map[dt.month]}<br><b>{dt.year}</b>")
+                # TOP: Year on top of Month
+                tick_text_top.append(f"<b>{dt.year}</b><br>{month_map[dt.month]}")
             else:
-                tick_text.append(f"{month_map[dt.month]}")
+                tick_text_bottom.append(f"{month_map[dt.month]}<br>&nbsp;")
+                tick_text_top.append(f"&nbsp;<br>{month_map[dt.month]}")
 
         # =========================
         # CHART HEIGHT
@@ -244,14 +250,12 @@ if uploaded_file is not None:
         # =========================
         # FORCE TOP AXIS VISIBILITY
         # =========================
-        # Plotly hides secondary axes if no data is bound to them.
-        # This adds an invisible "dummy" dot to force the top axis to render.
         fig.add_scatter(
             x=[min_date], 
             y=[unique_tasks[0]], 
             xaxis="x2", 
             mode="markers", 
-            marker=dict(color="rgba(0,0,0,0)"), # Completely transparent
+            marker=dict(color="rgba(0,0,0,0)"), 
             showlegend=False, 
             hoverinfo="skip"
         )
@@ -264,7 +268,7 @@ if uploaded_file is not None:
                 title="",
                 tickmode="array",
                 tickvals=tick_vals,
-                ticktext=tick_text,
+                ticktext=tick_text_bottom,
                 tickangle=0,
                 showgrid=True,
                 gridcolor="rgba(0,0,0,0.1)",
@@ -274,7 +278,7 @@ if uploaded_file is not None:
                 title="",
                 tickmode="array",
                 tickvals=tick_vals,
-                ticktext=tick_text,
+                ticktext=tick_text_top,
                 tickangle=0,
                 showgrid=False, 
                 overlaying="x",
@@ -285,7 +289,7 @@ if uploaded_file is not None:
             legend_title="Project Phases",
             height=chart_height,
             margin=dict(
-                t=140, # Pushed down to leave room for the top axis AND the "TODAY" text
+                t=160, # Increased top margin so the TODAY text clears the title
                 b=50,
                 l=10,
                 r=50
@@ -315,10 +319,10 @@ if uploaded_file is not None:
             line_dash="dash",
             line_color="red",
             annotation_text="📍 TODAY",
-            annotation_position="top right",
+            annotation_position="top",
             annotation_font_color="red",
             annotation_font_weight="bold",
-            annotation_yshift=40, # <--- THIS PUSHES THE TEXT UP ON TOP OF THE AXIS
+            annotation_yshift=65, # Pushed even higher to sit clearly above the Year text
             layer="above"
         )
 
