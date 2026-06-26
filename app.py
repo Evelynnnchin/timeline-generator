@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import numpy as np
+import io
 
 # =========================
 # PAGE SETUP
@@ -271,7 +272,7 @@ if uploaded_file is not None:
             )
 
         # =========================
-        # LAYOUT
+        # LAYOUT (ADDED TOP AXIS)
         # =========================
         fig.update_layout(
             xaxis=dict(
@@ -284,11 +285,22 @@ if uploaded_file is not None:
                 gridcolor="rgba(0,0,0,0.1)",
                 gridwidth=1
             ),
+            # NEW: Secondary X-Axis at the Top
+            xaxis2=dict(
+                title="",
+                tickmode="array",
+                tickvals=tick_vals,
+                ticktext=tick_text,
+                tickangle=0,
+                showgrid=False, # We don't want to draw double grid lines
+                overlaying="x",
+                side="top"
+            ),
             showlegend=True,
             legend_title="Project Phases",
             height=chart_height,
             margin=dict(
-                t=50,
+                t=80, # Increased top margin to fit the top axis
                 b=50,
                 l=10,
                 r=50
@@ -326,7 +338,7 @@ if uploaded_file is not None:
         )
 
         # =========================
-        # DISPLAY (UPDATED FOR HIGH-RES EXPORT)
+        # DISPLAY (HIGH-RES EXPORT)
         # =========================
         export_config = {
             'toImageButtonOptions': {
@@ -343,6 +355,34 @@ if uploaded_file is not None:
             fig,
             use_container_width=True,
             config=export_config
+        )
+
+        # =========================
+        # EXCEL EXPORT BUTTON
+        # =========================
+        st.write("---")
+        st.subheader("💾 Download Cleaned Data")
+        
+        # Create an in-memory buffer to build the Excel file
+        buffer = io.BytesIO()
+        with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+            
+            # Prepare a clean dataframe for export without the backend unique IDs
+            export_df = df_clean[['Project', 'Task', 'Start', 'Finish']].copy()
+            
+            # Format dates nicely for Excel
+            export_df['Start'] = export_df['Start'].dt.strftime('%d-%b-%y')
+            export_df['Finish'] = export_df['Finish'].dt.strftime('%d-%b-%y')
+            
+            # Write to the buffer
+            export_df.to_excel(writer, index=False, sheet_name='Cleaned_Schedule')
+        
+        # Create the download button
+        st.download_button(
+            label="📥 Download Schedule (.xlsx)",
+            data=buffer.getvalue(),
+            file_name="Master_Timeline_Processed.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
 
     except Exception as e:
