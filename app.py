@@ -322,7 +322,7 @@ if uploaded_file is not None:
             annotation_position="top",
             annotation_font_color="red",
             annotation_font_weight="bold",
-            annotation_yshift=50, # Pushed even higher to sit clearly above the Year text
+            annotation_yshift=40, # Pushed even higher to sit clearly above the Year text
             layer="above"
         )
 
