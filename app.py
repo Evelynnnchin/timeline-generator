@@ -292,13 +292,14 @@ if uploaded_file is not None:
                 tickangle=0,
                 showgrid=False, 
                 overlaying="x",
-                side="top"
+                side="top",
+                matches="x"
             ),
             showlegend=True,
             legend_title="Project Phases",
             height=chart_height,
             margin=dict(
-                t=80, 
+                t=120, 
                 b=50,
                 l=10,
                 r=50
