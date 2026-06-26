@@ -2,19 +2,20 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import numpy as np
+import io
 
 # 1. Page Setup
 st.set_page_config(page_title="Master Timeline Generator", layout="wide")
 st.title("📊 Master Project Timeline")
 
-# [NEW] Instructions Table
+# Instructions Table
 st.write("### 📂 Required File Format")
-st.write("Please ensure your uploaded Excel or CSV file follows this exact structure for the timeline to generate correctly:")
+st.write("Please ensure your uploaded Excel file follows this exact structure for the timeline to generate correctly:")
 format_data = {
     "Column A": ["Project Name (or empty)", "Project Name (or empty)"],
     "Column B": ["Task Name", "Task Name"],
-    "Column C": ["Start Date (DD-Mon-YY)", "Start Date (DD-Mon-YY)"],
-    "Column D": ["Finish Date (DD-Mon-YY)", "Finish Date (DD-Mon-YY)"]
+    "Column C": ["Start Date (DD-Mon-YY)", "Start Date (DD-MM-YY)"],
+    "Column D": ["Finish Date (DD-Mon-YY)", "Finish Date (DD-MM-YY)"]
 }
 st.table(pd.DataFrame(format_data))
 
@@ -23,10 +24,8 @@ st.write("---")
 # --- PERFORMANCE CACHE ---
 @st.cache_data
 def load_and_clean_data(file):
-    if file.name.endswith('.csv'):
-        df_raw = pd.read_csv(file, header=None, dtype=str)
-    else:
-        df_raw = pd.read_excel(file, header=None, dtype=str)
+    # Strictly reads Excel files now
+    df_raw = pd.read_excel(file, header=None, dtype=str)
 
     df_raw[0] = df_raw[0].replace(r'^\s*$', np.nan, regex=True)
     df_raw[1] = df_raw[1].replace(r'^\s*$', np.nan, regex=True)
@@ -51,8 +50,8 @@ def load_and_clean_data(file):
     
     return df_clean
 
-# 2. File Uploader
-uploaded_file = st.file_uploader("📂 Upload Schedule (.xlsx or .csv)", type=['xlsx', 'csv'])
+# 2. File Uploader (Excel Only)
+uploaded_file = st.file_uploader("📂 Upload Schedule (.xlsx)", type=['xlsx'])
 
 if uploaded_file is not None:
     try:
@@ -140,6 +139,30 @@ if uploaded_file is not None:
         )
 
         st.plotly_chart(fig, use_container_width=True)
+
+        # --- EXCEL DOWNLOAD BUTTON ---
+        st.write("---")
+        
+        # Create an in-memory buffer to build the Excel file
+        buffer = io.BytesIO()
+        with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+            # Prepare a clean dataframe for export
+            export_df = df_clean[['Project', 'Task', 'Start', 'Finish']].copy()
+            
+            # Format dates nicely for Excel
+            export_df['Start'] = export_df['Start'].dt.strftime('%d-%b-%y')
+            export_df['Finish'] = export_df['Finish'].dt.strftime('%d-%b-%y')
+            
+            # Write to the buffer
+            export_df.to_excel(writer, index=False, sheet_name='Cleaned_Schedule')
+        
+        # Create the download button
+        st.download_button(
+            label="📥 Download Cleaned Excel File",
+            data=buffer.getvalue(),
+            file_name="Master_Timeline_Processed.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
 
     except Exception as e:
         st.error(f"Oops! Something went wrong processing the data. Error details: {e}")
