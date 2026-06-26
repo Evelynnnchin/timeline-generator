@@ -192,35 +192,19 @@ if uploaded_file is not None:
         )
 
         month_map = {
-            1: "J",
-            2: "F",
-            3: "M",
-            4: "A",
-            5: "M",
-            6: "J",
-            7: "J",
-            8: "A",
-            9: "S",
-            10: "O",
-            11: "N",
-            12: "D"
+            1: "J", 2: "F", 3: "M", 4: "A", 5: "M", 6: "J", 
+            7: "J", 8: "A", 9: "S", 10: "O", 11: "N", 12: "D"
         }
 
         tick_vals = []
         tick_text = []
 
         for dt in all_months:
-
             tick_vals.append(dt)
-
             if dt.month == 6:
-                tick_text.append(
-                    f"{month_map[dt.month]}<br><b>{dt.year}</b>"
-                )
+                tick_text.append(f"{month_map[dt.month]}<br><b>{dt.year}</b>")
             else:
-                tick_text.append(
-                    f"{month_map[dt.month]}"
-                )
+                tick_text.append(f"{month_map[dt.month]}")
 
         # =========================
         # CHART HEIGHT
@@ -231,12 +215,7 @@ if uploaded_file is not None:
         # =========================
         # PROJECT BACKGROUNDS
         # =========================
-        unique_projects = (
-            df_clean["Project"]
-            .dropna()
-            .unique()
-            .tolist()
-        )
+        unique_projects = df_clean["Project"].dropna().unique().tolist()
 
         bg_colors = [
             "rgba(100,149,237,0.20)",
@@ -247,15 +226,7 @@ if uploaded_file is not None:
         ]
 
         for i, proj in enumerate(unique_projects):
-
-            proj_tasks = (
-                df_clean[
-                    df_clean["Project"] == proj
-                ]["Display_Task"]
-                .unique()
-                .tolist()
-            )
-
+            proj_tasks = df_clean[df_clean["Project"] == proj]["Display_Task"].unique().tolist()
             if not proj_tasks:
                 continue
 
@@ -269,6 +240,21 @@ if uploaded_file is not None:
                 layer="below",
                 line_width=0
             )
+
+        # =========================
+        # FORCE TOP AXIS VISIBILITY
+        # =========================
+        # Plotly hides secondary axes if no data is bound to them.
+        # This adds an invisible "dummy" dot to force the top axis to render.
+        fig.add_scatter(
+            x=[min_date], 
+            y=[unique_tasks[0]], 
+            xaxis="x2", 
+            mode="markers", 
+            marker=dict(color="rgba(0,0,0,0)"), # Completely transparent
+            showlegend=False, 
+            hoverinfo="skip"
+        )
 
         # =========================
         # LAYOUT (TOP & BOTTOM AXIS)
@@ -299,7 +285,7 @@ if uploaded_file is not None:
             legend_title="Project Phases",
             height=chart_height,
             margin=dict(
-                t=120, 
+                t=140, # Pushed down to leave room for the top axis AND the "TODAY" text
                 b=50,
                 l=10,
                 r=50
@@ -310,9 +296,7 @@ if uploaded_file is not None:
         # YEAR LINES
         # =========================
         for dt in all_months:
-
             if dt.month == 1:
-
                 fig.add_vline(
                     x=dt,
                     line_width=2,
@@ -321,7 +305,7 @@ if uploaded_file is not None:
                 )
 
         # =========================
-        # TODAY LINE
+        # TODAY LINE & TEXT FIX
         # =========================
         today_str = pd.Timestamp.now().strftime("%Y-%m-%d")
 
@@ -331,8 +315,10 @@ if uploaded_file is not None:
             line_dash="dash",
             line_color="red",
             annotation_text="📍 TODAY",
-            annotation_position="top",
+            annotation_position="top right",
             annotation_font_color="red",
+            annotation_font_weight="bold",
+            annotation_yshift=40, # <--- THIS PUSHES THE TEXT UP ON TOP OF THE AXIS
             layer="above"
         )
 
@@ -357,7 +343,6 @@ if uploaded_file is not None:
         )
 
     except Exception as e:
-
         st.error(
             f"Oops! Something went wrong processing the data. Error details: {e}"
         )
