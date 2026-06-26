@@ -133,7 +133,7 @@ if uploaded_file is not None:
 
         fig.add_vline(x=pd.Timestamp.now().strftime("%Y-%m-%d"), line_width=3, line_dash="dash", line_color="red",
                       annotation_text="📍 TODAY", annotation_position="top", annotation_font_color="red", 
-                      annotation_font_weight="bold", annotation_yshift=65, layer="above")
+                      annotation_font_weight="bold", annotation_yshift=40, layer="above")
 
         st.plotly_chart(fig, use_container_width=True, config={'toImageButtonOptions': {'format': 'png', 'filename': 'Master_Timeline_Visual', 'scale': 2}, 'displayModeBar': True})
 
