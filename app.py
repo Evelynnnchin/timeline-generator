@@ -2,7 +2,6 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import numpy as np
-from copy import deepcopy
 
 # =========================
 # PAGE SETUP
@@ -15,7 +14,7 @@ st.title("📊 Master Project Timeline")
 # =========================
 st.write("### 📂 Required File Format")
 st.write(
-    "Please ensure your uploaded Excel or CSV file follows this structure:"
+    "Please ensure your uploaded Excel or CSV file follows this exact structure:"
 )
 
 format_data = {
@@ -34,8 +33,9 @@ st.write("---")
 # =========================
 def parse_date_value(value):
     """
+    Robust date parser.
     Handles:
-    - Excel serial dates
+    - Excel dates
     - DD-MM-YY
     - DD/MM/YY
     - 11/Aug/21
@@ -50,17 +50,21 @@ def parse_date_value(value):
     if value == "" or value.lower() in ["nan", "nat", "none"]:
         return pd.NaT
 
+    # Remove hidden spaces
     value = value.replace("\xa0", " ").strip()
 
-    # Excel serial date
+    # Handle Excel serial numbers if they appear as plain numbers
     try:
         numeric_value = float(value)
         if 20000 <= numeric_value <= 80000:
             return pd.to_datetime(numeric_value, unit="D", origin="1899-12-30")
-    except Exception:
+    except:
         pass
 
-    return pd.to_datetime(value, errors="coerce", dayfirst=True)
+    # Try normal date parsing
+    parsed = pd.to_datetime(value, errors="coerce", dayfirst=True)
+
+    return parsed
 
 
 # =========================
@@ -77,15 +81,15 @@ def load_and_clean_data(file):
     while df_raw.shape[1] < 4:
         df_raw[df_raw.shape[1]] = np.nan
 
-    # Only use first 4 columns
+    # Keep only first 4 columns
     df_raw = df_raw.iloc[:, :4].copy()
     df_raw.columns = ["Project_Raw", "Task_Raw", "Start_Raw", "Finish_Raw"]
 
-    # Clean blank-looking cells
+    # Clean blank cells
     for col in df_raw.columns:
         df_raw[col] = df_raw[col].replace(r"^\s*$", np.nan, regex=True)
 
-    # Remove header row only if clearly header
+    # Remove header row only if it is clearly a header
     first_row = df_raw.iloc[0].astype(str).str.strip().str.lower().tolist()
 
     header_keywords = [
@@ -104,10 +108,10 @@ def load_and_clean_data(file):
     if any(cell in header_keywords for cell in first_row):
         df_raw = df_raw.iloc[1:].reset_index(drop=True)
 
-    # Keep original row number
+    # Original row number for checking
     df_raw["Original_Row_No"] = df_raw.index + 1
 
-    # Forward-fill project names from Column A
+    # Forward fill Column A project names
     df_raw["Project"] = df_raw["Project_Raw"].ffill()
 
     # IMPORTANT:
@@ -122,17 +126,17 @@ def load_and_clean_data(file):
     df["Start"] = df["Start_Raw"].apply(parse_date_value)
     df["Finish"] = df["Finish_Raw"].apply(parse_date_value)
 
-    # Check valid dates
+    # Check if real dates exist
     df["Has_Valid_Dates"] = df["Start"].notna() & df["Finish"].notna()
 
-    # If finish is earlier than start, swap them
+    # Fix rows where finish is earlier than start
     reversed_mask = df["Has_Valid_Dates"] & (df["Finish"] < df["Start"])
 
     temp_start = df.loc[reversed_mask, "Start"].copy()
     df.loc[reversed_mask, "Start"] = df.loc[reversed_mask, "Finish"]
     df.loc[reversed_mask, "Finish"] = temp_start
 
-    # Placeholder dates for missing/invalid dates
+    # Fallback placeholder date for rows with no valid date
     valid_rows = df[df["Has_Valid_Dates"]]
 
     if len(valid_rows) > 0:
@@ -142,30 +146,23 @@ def load_and_clean_data(file):
 
     fallback_finish = fallback_start + pd.Timedelta(days=7)
 
-    # Dates used for plotting
+    # Plot dates
     df["Plot_Start"] = df["Start"]
     df["Plot_Finish"] = df["Finish"]
 
     df.loc[~df["Has_Valid_Dates"], "Plot_Start"] = fallback_start
     df.loc[~df["Has_Valid_Dates"], "Plot_Finish"] = fallback_finish
 
-    # Make finish date inclusive for chart display.
-    # This also prevents same-day activities from disappearing.
-    valid_plot_mask = df["Has_Valid_Dates"]
-    df.loc[valid_plot_mask, "Plot_Finish"] = (
-        df.loc[valid_plot_mask, "Plot_Finish"] + pd.Timedelta(days=1)
-    )
-
-    # For missing/invalid dates, make sure placeholder bar is visible
+    # SUPER IMPORTANT:
+    # Plotly may not show bars where Start = Finish.
+    # So for display only, force every task bar to have at least 1 visible day.
     same_day_mask = df["Plot_Start"] >= df["Plot_Finish"]
-    df.loc[same_day_mask, "Plot_Finish"] = (
-        df.loc[same_day_mask, "Plot_Start"] + pd.Timedelta(days=1)
-    )
+    df.loc[same_day_mask, "Plot_Finish"] = df.loc[same_day_mask, "Plot_Start"] + pd.Timedelta(days=1)
 
-    # Display fields
+    # Display text
     df["Display_Task"] = df["Project"] + " : " + df["Task"]
 
-    # Unique y-axis key so duplicate task names do not collapse
+    # Unique y-axis row key so duplicate task names do not collapse
     df["Row_Key"] = (
         df["Original_Row_No"].astype(str)
         + " | "
@@ -186,11 +183,9 @@ def load_and_clean_data(file):
         "Missing / invalid dates"
     )
 
-    df["Duration_Days"] = np.where(
-        df["Has_Valid_Dates"],
-        (df["Finish"] - df["Start"]).dt.days + 1,
-        np.nan
-    )
+    df["Duration_Days"] = (
+        df["Plot_Finish"] - df["Plot_Start"]
+    ).dt.days
 
     return df.reset_index(drop=True)
 
@@ -221,35 +216,6 @@ if uploaded_file is not None:
         show_undated_tasks = st.sidebar.checkbox(
             "Show tasks with missing / invalid dates",
             value=True
-        )
-
-        # =========================
-        # EXPORT SETTINGS
-        # =========================
-        st.sidebar.header("Export Settings")
-
-        export_width = st.sidebar.number_input(
-            "Export Width",
-            min_value=800,
-            max_value=6000,
-            value=2000,
-            step=100
-        )
-
-        export_height_per_task = st.sidebar.number_input(
-            "Export Height Per Task",
-            min_value=20,
-            max_value=100,
-            value=36,
-            step=2
-        )
-
-        export_scale = st.sidebar.number_input(
-            "Export Scale",
-            min_value=1,
-            max_value=5,
-            value=2,
-            step=1
         )
 
         # =========================
@@ -285,7 +251,7 @@ if uploaded_file is not None:
             st.stop()
 
         # =========================
-        # TASK CHECK
+        # TASK COUNT CHECK
         # =========================
         st.write("### ✅ Column B Task Check")
         st.write(
@@ -312,8 +278,7 @@ if uploaded_file is not None:
                         "Finish_Raw",
                         "Start",
                         "Finish",
-                        "Date_Status",
-                        "Duration_Days"
+                        "Date_Status"
                     ]
                 ],
                 use_container_width=True
@@ -356,8 +321,8 @@ if uploaded_file is not None:
                 "Project": True,
                 "Start_Raw": True,
                 "Finish_Raw": True,
-                "Start": "|%B %d, %Y",
-                "Finish": "|%B %d, %Y",
+                "Plot_Start": "|%B %d, %Y",
+                "Plot_Finish": "|%B %d, %Y",
                 "Date_Status": True,
                 "Duration_Days": True,
             }
@@ -369,7 +334,7 @@ if uploaded_file is not None:
                 insidetextanchor="middle"
             )
 
-        # Preserve exact uploaded row order
+        # Preserve original uploaded row order
         unique_rows = df_view["Row_Key"].tolist()
         tick_text = df_view["Display_Task"].tolist()
 
@@ -462,8 +427,6 @@ if uploaded_file is not None:
             hoverinfo="skip"
         )
 
-        chart_height = max(650, len(unique_rows) * 32)
-
         # =========================
         # LAYOUT
         # =========================
@@ -488,7 +451,7 @@ if uploaded_file is not None:
                 matches="x"
             ),
             showlegend=True,
-            height=chart_height,
+            height=max(650, len(unique_rows) * 32),
             margin=dict(t=160, b=50, l=10, r=50)
         )
 
@@ -535,83 +498,6 @@ if uploaded_file is not None:
                 },
                 "displayModeBar": True
             }
-        )
-
-        # =========================
-        # EXPORT BUTTONS
-        # =========================
-        st.write("### 📄 Export Chart")
-
-        export_choice = st.radio(
-            "Choose file type:",
-            ["PDF", "PNG"],
-            horizontal=True
-        )
-
-        try:
-            export_fig = deepcopy(fig)
-
-            final_export_width = int(export_width)
-            final_export_height = max(
-                700,
-                len(unique_rows) * int(export_height_per_task)
-            )
-            final_export_scale = int(export_scale)
-
-            export_fig.update_layout(
-                width=final_export_width,
-                height=final_export_height,
-                margin=dict(t=180, b=80, l=40, r=80)
-            )
-
-            if export_choice == "PDF":
-                pdf_bytes = export_fig.to_image(
-                    format="pdf",
-                    width=final_export_width,
-                    height=final_export_height,
-                    scale=final_export_scale
-                )
-
-                st.download_button(
-                    label="📄 Download as PDF",
-                    data=pdf_bytes,
-                    file_name="Master_Timeline_Visual.pdf",
-                    mime="application/pdf"
-                )
-
-            elif export_choice == "PNG":
-                png_bytes = export_fig.to_image(
-                    format="png",
-                    width=final_export_width,
-                    height=final_export_height,
-                    scale=final_export_scale
-                )
-
-                st.download_button(
-                    label="🖼️ Download as PNG",
-                    data=png_bytes,
-                    file_name="Master_Timeline_Visual.png",
-                    mime="image/png"
-                )
-
-        except Exception as export_error:
-            st.error(
-                "Export failed. Use the pinned versions in requirements.txt below. "
-                "This avoids the Chrome requirement from newer Kaleido versions."
-            )
-            st.code(str(export_error))
-
-        # =========================
-        # OPTIONAL HTML FALLBACK
-        # =========================
-        st.write("### 🌐 Backup Export")
-        html_bytes = fig.to_html(include_plotlyjs="cdn").encode("utf-8")
-
-        st.download_button(
-            label="🌐 Download Interactive HTML Backup",
-            data=html_bytes,
-            file_name="Master_Timeline_Visual.html",
-            mime="text/html"
         )
 
     except Exception as e:
