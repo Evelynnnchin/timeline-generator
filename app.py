@@ -1,5 +1,6 @@
 import streamlit as st
 import pandas as pd
+import plotly.graph_objects as go
 import plotly.express as px
 import numpy as np
 from datetime import datetime
@@ -155,7 +156,7 @@ def load_and_clean_data(file):
     # Display labels
     df["Display_Task"] = df["Project"] + " : " + df["Task"]
 
-    # Unique y-axis key so duplicate task names do not collapse
+    # Unique key for checking, not used as categorical y-axis anymore
     df["Row_Key"] = (
         df["Original_Row_No"].astype(str)
         + " | "
@@ -183,6 +184,26 @@ def load_and_clean_data(file):
     )
 
     return df.reset_index(drop=True)
+
+
+# =========================
+# COLOUR HELPER
+# =========================
+def make_color_map(values):
+    palette = (
+        px.colors.qualitative.Plotly
+        + px.colors.qualitative.Set3
+        + px.colors.qualitative.Dark24
+    )
+
+    color_map = {}
+
+    for i, value in enumerate(values):
+        color_map[value] = palette[i % len(palette)]
+
+    color_map["Missing / invalid dates"] = "#9E9E9E"
+
+    return color_map
 
 
 # =========================
@@ -217,6 +238,43 @@ if uploaded_file is not None:
         )
 
         # =========================
+        # CHART SPACING SETTINGS
+        # =========================
+        st.sidebar.header("Chart Spacing")
+
+        chart_row_height = st.sidebar.slider(
+            "Row Height",
+            min_value=24,
+            max_value=60,
+            value=34,
+            step=2,
+        )
+
+        bar_thickness = st.sidebar.slider(
+            "Bar Thickness",
+            min_value=0.40,
+            max_value=1.00,
+            value=0.90,
+            step=0.05,
+        )
+
+        gap_above_first_bar = st.sidebar.slider(
+            "Gap Above First Bar",
+            min_value=0.00,
+            max_value=0.30,
+            value=0.02,
+            step=0.01,
+        )
+
+        top_margin = st.sidebar.slider(
+            "Top Margin",
+            min_value=35,
+            max_value=100,
+            value=55,
+            step=5,
+        )
+
+        # =========================
         # FILTERS
         # =========================
         st.sidebar.header("Filters")
@@ -247,6 +305,10 @@ if uploaded_file is not None:
         if len(df_view) == 0:
             st.warning("No tasks to display based on current filters.")
             st.stop()
+
+        # Preserve uploaded row order
+        df_view = df_view.reset_index(drop=True)
+        df_view["Y_Pos"] = df_view.index
 
         # =========================
         # TASK COUNT CHECK
@@ -303,52 +365,6 @@ if uploaded_file is not None:
             df_view["Label"] = ""
 
         # =========================
-        # CHART
-        # =========================
-        fig = px.timeline(
-            df_view,
-            x_start="Plot_Start",
-            x_end="Plot_Finish",
-            y="Row_Key",
-            color="Color_Group",
-            text="Label" if label_option != "None" else None,
-            title=f"<b>{chart_title}</b>",
-            hover_data={
-                "Row_Key": False,
-                "Display_Task": True,
-                "Task": True,
-                "Project": True,
-                "Start_Raw": True,
-                "Finish_Raw": True,
-                "Plot_Start": "|%B %d, %Y",
-                "Plot_Finish": "|%B %d, %Y",
-                "Date_Status": True,
-                "Duration_Days": True,
-            },
-        )
-
-        if label_option != "None":
-            fig.update_traces(
-                textposition="inside",
-                insidetextanchor="middle",
-            )
-
-        # Preserve uploaded row order
-        unique_rows = df_view["Row_Key"].tolist()
-        tick_text = df_view["Display_Task"].tolist()
-
-        fig.update_yaxes(
-            autorange="reversed",
-            title="",
-            categoryorder="array",
-            categoryarray=unique_rows,
-            tickmode="array",
-            tickvals=unique_rows,
-            ticktext=tick_text,
-            tickfont=dict(color="black", size=13),
-        )
-
-        # =========================
         # AXIS DATES
         # =========================
         min_date = df_view["Plot_Start"].min().replace(day=1)
@@ -386,8 +402,15 @@ if uploaded_file is not None:
                 tick_text_top.append(f"&nbsp;<br>{month_map[dt.month]}")
 
         # =========================
-        # PROJECT BACKGROUND COLOURS
+        # CUSTOM NUMERIC-Y GANTT CHART
+        # This removes the big top gap.
         # =========================
+        fig = go.Figure()
+
+        color_groups = df_view["Color_Group"].dropna().unique().tolist()
+        color_map = make_color_map(color_groups)
+
+        # Project background colours
         background_colours = [
             "rgba(100,149,237,0.20)",
             "rgba(143,188,143,0.25)",
@@ -401,24 +424,71 @@ if uploaded_file is not None:
         visible_projects = df_view["Project"].dropna().unique().tolist()
 
         for i, proj in enumerate(visible_projects):
-            proj_rows = df_view[df_view["Project"] == proj]["Row_Key"].tolist()
+            project_indexes = df_view.index[df_view["Project"] == proj].tolist()
 
-            if proj_rows:
-                first_index = unique_rows.index(proj_rows[0])
-                last_index = unique_rows.index(proj_rows[-1])
-
+            if project_indexes:
                 fig.add_hrect(
-                    y0=first_index - 0.5,
-                    y1=last_index + 0.5,
+                    y0=project_indexes[0] - 0.5,
+                    y1=project_indexes[-1] + 0.5,
                     fillcolor=background_colours[i % len(background_colours)],
                     layer="below",
                     line_width=0,
                 )
 
+        # Add bars grouped by colour group so legend works
+        for group in color_groups:
+            group_df = df_view[df_view["Color_Group"] == group].copy()
+
+            duration_ms = (
+                group_df["Plot_Finish"] - group_df["Plot_Start"]
+            ).dt.total_seconds() * 1000
+
+            custom_data = np.stack(
+                [
+                    group_df["Display_Task"].astype(str),
+                    group_df["Project"].astype(str),
+                    group_df["Task"].astype(str),
+                    group_df["Start"].dt.strftime("%d %b %Y").fillna("Invalid date"),
+                    group_df["Finish"].dt.strftime("%d %b %Y").fillna("Invalid date"),
+                    group_df["Date_Status"].astype(str),
+                    group_df["Duration_Days"].fillna("").astype(str),
+                ],
+                axis=-1,
+            )
+
+            fig.add_trace(
+                go.Bar(
+                    x=duration_ms,
+                    y=group_df["Y_Pos"],
+                    base=group_df["Plot_Start"],
+                    orientation="h",
+                    width=float(bar_thickness),
+                    name=str(group),
+                    marker=dict(
+                        color=color_map.get(group, "#1f77b4"),
+                        line=dict(width=0),
+                    ),
+                    text=group_df["Label"] if label_option != "None" else None,
+                    textposition="inside",
+                    insidetextanchor="middle",
+                    customdata=custom_data,
+                    hovertemplate=(
+                        "<b>%{customdata[0]}</b><br>"
+                        "Project: %{customdata[1]}<br>"
+                        "Task: %{customdata[2]}<br>"
+                        "Start: %{customdata[3]}<br>"
+                        "Finish: %{customdata[4]}<br>"
+                        "Status: %{customdata[5]}<br>"
+                        "Duration: %{customdata[6]} days"
+                        "<extra></extra>"
+                    ),
+                )
+            )
+
         # Invisible scatter to force top x-axis
         fig.add_scatter(
             x=[min_date],
-            y=[unique_rows[0]],
+            y=[0],
             xaxis="x2",
             mode="markers",
             marker=dict(color="rgba(0,0,0,0)"),
@@ -427,12 +497,33 @@ if uploaded_file is not None:
         )
 
         # =========================
-        # DYNAMIC HEIGHT
-        # Removes big gap between top axis and first bar
+        # Y-AXIS REAL GAP FIX
         # =========================
-        chart_height = max(200, len(unique_rows) * 34 + 160)
+        n_rows = len(df_view)
+
+        top_range = -(float(bar_thickness) / 2 + float(gap_above_first_bar))
+        bottom_range = (n_rows - 1) + (float(bar_thickness) / 2) + 0.25
+
+        y_axis_range = [bottom_range, top_range]
+
+        # =========================
+        # COMPACT HEIGHT
+        # =========================
+        chart_height = max(180, n_rows * int(chart_row_height) + 90)
+
+        fig.update_yaxes(
+            range=y_axis_range,
+            autorange=False,
+            tickmode="array",
+            tickvals=df_view["Y_Pos"].tolist(),
+            ticktext=df_view["Display_Task"].tolist(),
+            title="",
+            tickfont=dict(color="black", size=13),
+            fixedrange=False,
+        )
 
         fig.update_layout(
+            title=f"<b>{chart_title}</b>",
             xaxis=dict(
                 tickmode="array",
                 tickvals=tick_vals,
@@ -441,6 +532,7 @@ if uploaded_file is not None:
                 showgrid=True,
                 gridcolor="rgba(0,0,0,0.1)",
                 gridwidth=1,
+                type="date",
             ),
             xaxis2=dict(
                 tickmode="array",
@@ -451,10 +543,17 @@ if uploaded_file is not None:
                 overlaying="x",
                 side="top",
                 matches="x",
+                type="date",
             ),
+            barmode="overlay",
+            bargap=0.02,
             showlegend=True,
             height=chart_height,
-            margin=dict(t=90, b=40, l=10, r=50),
+            margin=dict(t=int(top_margin), b=35, l=10, r=50),
+            legend=dict(
+                title="Color_Group",
+                orientation="v",
+            ),
         )
 
         # =========================
@@ -499,6 +598,7 @@ if uploaded_file is not None:
                     "scale": 2,
                 },
                 "displayModeBar": True,
+                "scrollZoom": True,
             },
         )
 
