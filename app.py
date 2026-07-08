@@ -538,7 +538,7 @@ if uploaded_file is not None:
             annotation_text="📍 TODAY",
             annotation_position="top",
             annotation_font_color="red",
-            annotation_yshift=5,
+            annotation_yshift=0,
             layer="above",
         )
 
