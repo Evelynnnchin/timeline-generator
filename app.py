@@ -18,55 +18,116 @@ st.write(
 )
 
 format_data = {
-    "Column A": ["Project Name (or empty)", "Project Name (or empty)"],
+    "Column A": ["Project Name / Project Header / Empty", "Project Name / Project Header / Empty"],
     "Column B": ["Task Name", "Task Name"],
-    "Column C": ["Start Date (DD-MM-YY)", "Start Date (DD-MM-YY)"],
-    "Column D": ["Finish Date (DD-MM-YY)", "Finish Date (DD-MM-YY)"],
+    "Column C": ["Start Date", "Start Date"],
+    "Column D": ["Finish Date", "Finish Date"],
 }
 
 st.table(pd.DataFrame(format_data))
 st.write("---")
+
+
+# =========================
+# DATE CLEANER
+# =========================
+def clean_date_series(series):
+    """
+    Converts Excel / CSV date values into pandas datetime.
+    Keeps invalid dates as NaT instead of crashing.
+    """
+    return pd.to_datetime(series, errors="coerce", dayfirst=True)
+
 
 # =========================
 # DATA LOADER
 # =========================
 @st.cache_data
 def load_and_clean_data(file):
-    if file.name.endswith(".csv"):
+    if file.name.lower().endswith(".csv"):
         df_raw = pd.read_csv(file, header=None, dtype=str)
     else:
         df_raw = pd.read_excel(file, header=None, dtype=str)
 
-    # Remove empty-looking cells
-    df_raw[0] = df_raw[0].replace(r"^\s*$", np.nan, regex=True)
-    df_raw[1] = df_raw[1].replace(r"^\s*$", np.nan, regex=True)
+    # Make sure at least 4 columns exist
+    while df_raw.shape[1] < 4:
+        df_raw[df_raw.shape[1]] = np.nan
 
-    # Remove header row if uploaded file already has headers
-    if str(df_raw.iloc[0, 0]).strip().lower() == "project":
+    # Keep only first 4 columns
+    df_raw = df_raw.iloc[:, :4].copy()
+
+    # Rename columns for easier handling
+    df_raw.columns = ["Project_Raw", "Task_Raw", "Start_Raw", "Finish_Raw"]
+
+    # Remove empty-looking strings
+    for col in df_raw.columns:
+        df_raw[col] = df_raw[col].replace(r"^\s*$", np.nan, regex=True)
+
+    # Remove common header rows
+    header_words = ["project", "project name", "task", "task name", "start", "finish"]
+    first_row_values = df_raw.iloc[0].astype(str).str.strip().str.lower().tolist()
+
+    if any(v in header_words for v in first_row_values):
         df_raw = df_raw.iloc[1:].reset_index(drop=True)
 
-    # Forward fill project names
-    df_raw["Extracted_Project"] = df_raw[0].ffill()
+    # Keep original Excel-like row number after possible header removal
+    df_raw["Original_Row_No"] = df_raw.index + 1
 
-    # Only rows with task name are actual task rows
-    task_mask = df_raw[1].notna()
+    # Forward-fill project names from Column A
+    df_raw["Project"] = df_raw["Project_Raw"].ffill()
+
+    # Every non-empty Column B is treated as a task row
+    task_mask = df_raw["Task_Raw"].notna()
     df = df_raw[task_mask].copy()
 
-    df_clean = pd.DataFrame()
-    df_clean["Project"] = df["Extracted_Project"].astype(str)
-    df_clean["Task"] = df[1].astype(str)
+    # Clean text
+    df["Project"] = df["Project"].fillna("No Project").astype(str).str.strip()
+    df["Task"] = df["Task_Raw"].astype(str).str.strip()
 
     # Convert dates
-    df_clean["Start"] = pd.to_datetime(df[2], errors="coerce", dayfirst=True)
-    df_clean["Finish"] = pd.to_datetime(df[3], errors="coerce", dayfirst=True)
+    df["Start"] = clean_date_series(df["Start_Raw"])
+    df["Finish"] = clean_date_series(df["Finish_Raw"])
 
-    # Remove rows without valid dates
-    df_clean = df_clean.dropna(subset=["Start", "Finish"])
+    # Identify invalid/missing date rows
+    df["Has_Valid_Dates"] = df["Start"].notna() & df["Finish"].notna()
 
-    # Display label on y-axis
-    df_clean["Display_Task"] = df_clean["Project"] + " : " + df_clean["Task"]
+    # Fix rows where Finish is earlier than Start
+    reversed_mask = df["Has_Valid_Dates"] & (df["Finish"] < df["Start"])
+    df.loc[reversed_mask, ["Start", "Finish"]] = df.loc[reversed_mask, ["Finish", "Start"]].values
 
-    return df_clean
+    # Create fallback date range for undated tasks
+    valid_dates = df.loc[df["Has_Valid_Dates"], ["Start", "Finish"]]
+
+    if len(valid_dates) > 0:
+        fallback_start = valid_dates["Start"].min()
+    else:
+        fallback_start = pd.Timestamp.today().normalize()
+
+    fallback_finish = fallback_start + pd.Timedelta(days=7)
+
+    # These are the dates used for plotting.
+    # Valid rows use real dates.
+    # Invalid rows use placeholder dates so they still appear.
+    df["Plot_Start"] = df["Start"]
+    df["Plot_Finish"] = df["Finish"]
+
+    df.loc[~df["Has_Valid_Dates"], "Plot_Start"] = fallback_start
+    df.loc[~df["Has_Valid_Dates"], "Plot_Finish"] = fallback_finish
+
+    # Important:
+    # Use unique y-axis key so duplicate task names do not collapse into one row.
+    df["Row_Key"] = df["Original_Row_No"].astype(str) + " | " + df["Project"] + " : " + df["Task"]
+
+    # Nice label to display on y-axis
+    df["Display_Task"] = df["Project"] + " : " + df["Task"]
+
+    # Status
+    df["Date_Status"] = np.where(df["Has_Valid_Dates"], "Valid dates", "Missing / invalid dates")
+
+    # Duration
+    df["Duration_Days"] = (df["Plot_Finish"] - df["Plot_Start"]).dt.days + 1
+
+    return df.reset_index(drop=True)
 
 
 # =========================
@@ -78,6 +139,10 @@ if uploaded_file is not None:
     try:
         df_clean = load_and_clean_data(uploaded_file)
 
+        if len(df_clean) == 0:
+            st.error("No tasks found. Please make sure Column B contains task names.")
+            st.stop()
+
         # =========================
         # SIDEBAR SETTINGS
         # =========================
@@ -88,8 +153,13 @@ if uploaded_file is not None:
             value="Master Department Schedule: Grand View"
         )
 
+        show_undated_tasks = st.sidebar.checkbox(
+            "Show tasks with missing / invalid dates",
+            value=True
+        )
+
         # =========================
-        # PROJECT FILTERS - CHECKBOX VERSION
+        # PROJECT FILTERS
         # =========================
         st.sidebar.header("Filters")
 
@@ -111,46 +181,81 @@ if uploaded_file is not None:
             if checked:
                 selected_projects.append(project)
 
-        df_clean = df_clean[df_clean["Project"].isin(selected_projects)]
+        df_view = df_clean[df_clean["Project"].isin(selected_projects)].copy()
 
-        if len(df_clean) == 0:
-            st.warning("No projects selected.")
+        if not show_undated_tasks:
+            df_view = df_view[df_view["Has_Valid_Dates"]].copy()
+
+        if len(df_view) == 0:
+            st.warning("No tasks to display based on current filters.")
             st.stop()
+
+        # =========================
+        # WARN USER ABOUT MISSING DATES
+        # =========================
+        missing_date_rows = df_clean[~df_clean["Has_Valid_Dates"]].copy()
+
+        if len(missing_date_rows) > 0:
+            st.warning(
+                f"{len(missing_date_rows)} task(s) from Column B have missing or invalid dates. "
+                "They are still shown on the chart using a grey placeholder bar."
+            )
+
+            with st.expander("Show tasks with missing / invalid dates"):
+                st.dataframe(
+                    missing_date_rows[
+                        [
+                            "Original_Row_No",
+                            "Project",
+                            "Task",
+                            "Start_Raw",
+                            "Finish_Raw"
+                        ]
+                    ],
+                    use_container_width=True
+                )
 
         # =========================
         # BAR LABEL OPTIONS
         # =========================
         label_option = st.sidebar.selectbox(
             "Bar Labels",
-            ["None", "Task", "Project", "Task + Project"]
+            ["None", "Task", "Project", "Task + Project", "Date Status"]
         )
 
         if label_option == "Task":
-            df_clean["Label"] = df_clean["Task"]
+            df_view["Label"] = df_view["Task"]
         elif label_option == "Project":
-            df_clean["Label"] = df_clean["Project"]
+            df_view["Label"] = df_view["Project"]
         elif label_option == "Task + Project":
-            df_clean["Label"] = df_clean["Project"] + "<br>" + df_clean["Task"]
+            df_view["Label"] = df_view["Project"] + "<br>" + df_view["Task"]
+        elif label_option == "Date Status":
+            df_view["Label"] = df_view["Date_Status"]
         else:
-            df_clean["Label"] = ""
+            df_view["Label"] = ""
 
         # =========================
         # CHART LOGIC
         # =========================
         fig = px.timeline(
-            df_clean,
-            x_start="Start",
-            x_end="Finish",
-            y="Display_Task",
-            color="Task",
+            df_view,
+            x_start="Plot_Start",
+            x_end="Plot_Finish",
+            y="Row_Key",
+            color="Date_Status",
             text="Label" if label_option != "None" else None,
             title=f"<b>{chart_title}</b>",
             hover_data={
-                "Display_Task": False,
+                "Row_Key": False,
+                "Display_Task": True,
                 "Task": True,
                 "Project": True,
-                "Start": "|%B %d, %Y",
-                "Finish": "|%B %d, %Y",
+                "Start_Raw": True,
+                "Finish_Raw": True,
+                "Plot_Start": "|%B %d, %Y",
+                "Plot_Finish": "|%B %d, %Y",
+                "Date_Status": True,
+                "Duration_Days": True,
             }
         )
 
@@ -160,21 +265,26 @@ if uploaded_file is not None:
                 insidetextanchor="middle"
             )
 
-        unique_tasks = df_clean["Display_Task"].unique().tolist()
+        # Keep exact row order from uploaded file
+        unique_rows = df_view["Row_Key"].tolist()
+        tick_text = df_view["Display_Task"].tolist()
 
         fig.update_yaxes(
             autorange="reversed",
             title="",
             categoryorder="array",
-            categoryarray=unique_tasks,
+            categoryarray=unique_rows,
+            tickmode="array",
+            tickvals=unique_rows,
+            ticktext=tick_text,
             tickfont=dict(color="black", size=13)
         )
 
         # =========================
         # AXIS DATES
         # =========================
-        min_date = df_clean["Start"].min().replace(day=1)
-        max_date = df_clean["Finish"].max()
+        min_date = df_view["Plot_Start"].min().replace(day=1)
+        max_date = df_view["Plot_Finish"].max()
 
         all_months = pd.date_range(start=min_date, end=max_date, freq="MS")
 
@@ -215,16 +325,23 @@ if uploaded_file is not None:
             "rgba(143,188,143,0.25)",
             "rgba(244,164,96,0.25)",
             "rgba(216,191,216,0.30)",
-            "rgba(255,160,122,0.25)"
+            "rgba(255,160,122,0.25)",
+            "rgba(176,196,222,0.25)",
+            "rgba(152,251,152,0.20)"
         ]
 
-        for i, proj in enumerate(df_clean["Project"].dropna().unique()):
-            proj_tasks = df_clean[df_clean["Project"] == proj]["Display_Task"].unique().tolist()
+        visible_projects = df_view["Project"].dropna().unique().tolist()
 
-            if proj_tasks:
+        for i, proj in enumerate(visible_projects):
+            proj_rows = df_view[df_view["Project"] == proj]["Row_Key"].tolist()
+
+            if proj_rows:
+                first_index = unique_rows.index(proj_rows[0])
+                last_index = unique_rows.index(proj_rows[-1])
+
                 fig.add_hrect(
-                    y0=unique_tasks.index(proj_tasks[0]) - 0.5,
-                    y1=unique_tasks.index(proj_tasks[-1]) + 0.5,
+                    y0=first_index - 0.5,
+                    y1=last_index + 0.5,
                     fillcolor=background_colours[i % len(background_colours)],
                     layer="below",
                     line_width=0
@@ -233,7 +350,7 @@ if uploaded_file is not None:
         # Invisible scatter to force top x-axis to appear
         fig.add_scatter(
             x=[min_date],
-            y=[unique_tasks[0]],
+            y=[unique_rows[0]],
             xaxis="x2",
             mode="markers",
             marker=dict(color="rgba(0,0,0,0)"),
@@ -265,7 +382,7 @@ if uploaded_file is not None:
                 matches="x"
             ),
             showlegend=True,
-            height=max(600, len(unique_tasks) * 25),
+            height=max(650, len(unique_rows) * 28),
             margin=dict(t=160, b=50, l=10, r=50)
         )
 
@@ -284,15 +401,16 @@ if uploaded_file is not None:
         # =========================
         # TODAY LINE
         # =========================
+        today = pd.Timestamp.now().normalize()
+
         fig.add_vline(
-            x=pd.Timestamp.now().strftime("%Y-%m-%d"),
+            x=today,
             line_width=3,
             line_dash="dash",
             line_color="red",
             annotation_text="📍 TODAY",
             annotation_position="top",
             annotation_font_color="red",
-            annotation_font_weight="bold",
             annotation_yshift=40,
             layer="above"
         )
@@ -312,6 +430,30 @@ if uploaded_file is not None:
                 "displayModeBar": True
             }
         )
+
+        # =========================
+        # TASK CHECK TABLE
+        # =========================
+        st.write("### ✅ Task Check")
+        st.write(
+            f"Total Column B tasks found: **{len(df_clean)}** | "
+            f"Shown in current view: **{len(df_view)}**"
+        )
+
+        with st.expander("Show all detected Column B tasks"):
+            st.dataframe(
+                df_clean[
+                    [
+                        "Original_Row_No",
+                        "Project",
+                        "Task",
+                        "Start_Raw",
+                        "Finish_Raw",
+                        "Date_Status"
+                    ]
+                ],
+                use_container_width=True
+            )
 
     except Exception as e:
         st.error(f"Error processing data: {e}")
