@@ -430,7 +430,7 @@ if uploaded_file is not None:
         # DYNAMIC HEIGHT
         # Removes big gap between top axis and first bar
         # =========================
-        chart_height = max(280, len(unique_rows) * 34 + 160)
+        chart_height = max(200, len(unique_rows) * 34 + 160)
 
         fig.update_layout(
             xaxis=dict(
