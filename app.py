@@ -217,6 +217,43 @@ if uploaded_file is not None:
         )
 
         # =========================
+        # CHART SPACING SETTINGS
+        # =========================
+        st.sidebar.header("Chart Spacing")
+
+        chart_row_height = st.sidebar.slider(
+            "Row Height",
+            min_value=24,
+            max_value=60,
+            value=34,
+            step=2,
+        )
+
+        top_gap = st.sidebar.slider(
+            "Gap Between Top Axis and First Bar",
+            min_value=0.02,
+            max_value=0.50,
+            value=0.08,
+            step=0.01,
+        )
+
+        bar_thickness = st.sidebar.slider(
+            "Bar Thickness",
+            min_value=0.40,
+            max_value=1.00,
+            value=0.85,
+            step=0.05,
+        )
+
+        top_margin = st.sidebar.slider(
+            "Top Margin",
+            min_value=40,
+            max_value=120,
+            value=70,
+            step=5,
+        )
+
+        # =========================
         # FILTERS
         # =========================
         st.sidebar.header("Filters")
@@ -333,20 +370,12 @@ if uploaded_file is not None:
                 insidetextanchor="middle",
             )
 
+        # Make bars thicker so they sit closer visually
+        fig.update_traces(width=bar_thickness)
+
         # Preserve uploaded row order
         unique_rows = df_view["Row_Key"].tolist()
         tick_text = df_view["Display_Task"].tolist()
-
-        fig.update_yaxes(
-            autorange="reversed",
-            title="",
-            categoryorder="array",
-            categoryarray=unique_rows,
-            tickmode="array",
-            tickvals=unique_rows,
-            ticktext=tick_text,
-            tickfont=dict(color="black", size=13),
-        )
 
         # =========================
         # AXIS DATES
@@ -427,10 +456,34 @@ if uploaded_file is not None:
         )
 
         # =========================
-        # DYNAMIC HEIGHT
-        # Removes big gap between top axis and first bar
+        # IMPORTANT GAP FIX
+        # Plotly category axes normally keep 0.5 category padding.
+        # This manual range reduces the padding above the first bar.
         # =========================
-        chart_height = max(280, len(unique_rows) * 34 + 160)
+        n_rows = len(unique_rows)
+
+        if n_rows == 1:
+            y_axis_range = [0.60, -float(top_gap)]
+        else:
+            y_axis_range = [n_rows - 0.55, -float(top_gap)]
+
+        fig.update_yaxes(
+            autorange=False,
+            range=y_axis_range,
+            title="",
+            categoryorder="array",
+            categoryarray=unique_rows,
+            tickmode="array",
+            tickvals=unique_rows,
+            ticktext=tick_text,
+            tickfont=dict(color="black", size=13),
+            fixedrange=False,
+        )
+
+        # =========================
+        # COMPACT DYNAMIC HEIGHT
+        # =========================
+        chart_height = max(210, n_rows * int(chart_row_height) + 120)
 
         fig.update_layout(
             xaxis=dict(
@@ -441,6 +494,7 @@ if uploaded_file is not None:
                 showgrid=True,
                 gridcolor="rgba(0,0,0,0.1)",
                 gridwidth=1,
+                fixedrange=False,
             ),
             xaxis2=dict(
                 tickmode="array",
@@ -451,10 +505,12 @@ if uploaded_file is not None:
                 overlaying="x",
                 side="top",
                 matches="x",
+                fixedrange=False,
             ),
             showlegend=True,
             height=chart_height,
-            margin=dict(t=90, b=40, l=10, r=50),
+            margin=dict(t=int(top_margin), b=35, l=10, r=50),
+            bargap=0.05,
         )
 
         # =========================
@@ -482,7 +538,7 @@ if uploaded_file is not None:
             annotation_text="📍 TODAY",
             annotation_position="top",
             annotation_font_color="red",
-            annotation_yshift=25,
+            annotation_yshift=18,
             layer="above",
         )
 
@@ -499,6 +555,7 @@ if uploaded_file is not None:
                     "scale": 2,
                 },
                 "displayModeBar": True,
+                "scrollZoom": True,
             },
         )
 
