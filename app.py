@@ -2,6 +2,18 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import numpy as np
+import io
+from datetime import datetime
+from zoneinfo import ZoneInfo
+
+try:
+    from reportlab.pdfgen import canvas
+    from reportlab.lib import colors
+    from reportlab.pdfbase.pdfmetrics import stringWidth
+    REPORTLAB_AVAILABLE = True
+except ModuleNotFoundError:
+    REPORTLAB_AVAILABLE = False
+
 
 # =========================
 # PAGE SETUP
@@ -9,12 +21,13 @@ import numpy as np
 st.set_page_config(page_title="Master Timeline Generator", layout="wide")
 st.title("📊 Master Project Timeline")
 
+
 # =========================
 # FILE FORMAT GUIDE
 # =========================
 st.write("### 📂 Required File Format")
 st.write(
-    "Please ensure your uploaded Excel or CSV file follows this exact structure:"
+    "Please ensure your uploaded Excel or CSV file follows this structure:"
 )
 
 format_data = {
@@ -32,16 +45,6 @@ st.write("---")
 # DATE PARSER
 # =========================
 def parse_date_value(value):
-    """
-    Robust date parser.
-    Handles:
-    - Excel dates
-    - DD-MM-YY
-    - DD/MM/YY
-    - 11/Aug/21
-    - 11-Aug-21
-    - normal datetime values
-    """
     if pd.isna(value):
         return pd.NaT
 
@@ -50,21 +53,16 @@ def parse_date_value(value):
     if value == "" or value.lower() in ["nan", "nat", "none"]:
         return pd.NaT
 
-    # Remove hidden spaces
     value = value.replace("\xa0", " ").strip()
 
-    # Handle Excel serial numbers if they appear as plain numbers
     try:
         numeric_value = float(value)
         if 20000 <= numeric_value <= 80000:
             return pd.to_datetime(numeric_value, unit="D", origin="1899-12-30")
-    except:
+    except Exception:
         pass
 
-    # Try normal date parsing
-    parsed = pd.to_datetime(value, errors="coerce", dayfirst=True)
-
-    return parsed
+    return pd.to_datetime(value, errors="coerce", dayfirst=True)
 
 
 # =========================
@@ -77,19 +75,15 @@ def load_and_clean_data(file):
     else:
         df_raw = pd.read_excel(file, header=None, dtype=str)
 
-    # Make sure at least 4 columns exist
     while df_raw.shape[1] < 4:
         df_raw[df_raw.shape[1]] = np.nan
 
-    # Keep only first 4 columns
     df_raw = df_raw.iloc[:, :4].copy()
     df_raw.columns = ["Project_Raw", "Task_Raw", "Start_Raw", "Finish_Raw"]
 
-    # Clean blank cells
     for col in df_raw.columns:
         df_raw[col] = df_raw[col].replace(r"^\s*$", np.nan, regex=True)
 
-    # Remove header row only if it is clearly a header
     first_row = df_raw.iloc[0].astype(str).str.strip().str.lower().tolist()
 
     header_keywords = [
@@ -102,41 +96,34 @@ def load_and_clean_data(file):
         "finish",
         "finish date",
         "end",
-        "end date"
+        "end date",
     ]
 
     if any(cell in header_keywords for cell in first_row):
         df_raw = df_raw.iloc[1:].reset_index(drop=True)
 
-    # Original row number for checking
     df_raw["Original_Row_No"] = df_raw.index + 1
-
-    # Forward fill Column A project names
     df_raw["Project"] = df_raw["Project_Raw"].ffill()
 
-    # IMPORTANT:
-    # Every non-empty Column B row is treated as a task.
+    # Every non-empty Column B row becomes a task
     task_mask = df_raw["Task_Raw"].notna()
     df = df_raw[task_mask].copy()
 
     df["Project"] = df["Project"].fillna("No Project").astype(str).str.strip()
     df["Task"] = df["Task_Raw"].astype(str).str.strip()
 
-    # Parse dates
     df["Start"] = df["Start_Raw"].apply(parse_date_value)
     df["Finish"] = df["Finish_Raw"].apply(parse_date_value)
 
-    # Check if real dates exist
     df["Has_Valid_Dates"] = df["Start"].notna() & df["Finish"].notna()
 
-    # Fix rows where finish is earlier than start
+    # Swap if Finish is earlier than Start
     reversed_mask = df["Has_Valid_Dates"] & (df["Finish"] < df["Start"])
 
     temp_start = df.loc[reversed_mask, "Start"].copy()
     df.loc[reversed_mask, "Start"] = df.loc[reversed_mask, "Finish"]
     df.loc[reversed_mask, "Finish"] = temp_start
 
-    # Fallback placeholder date for rows with no valid date
     valid_rows = df[df["Has_Valid_Dates"]]
 
     if len(valid_rows) > 0:
@@ -146,23 +133,27 @@ def load_and_clean_data(file):
 
     fallback_finish = fallback_start + pd.Timedelta(days=7)
 
-    # Plot dates
     df["Plot_Start"] = df["Start"]
     df["Plot_Finish"] = df["Finish"]
 
     df.loc[~df["Has_Valid_Dates"], "Plot_Start"] = fallback_start
     df.loc[~df["Has_Valid_Dates"], "Plot_Finish"] = fallback_finish
 
-    # SUPER IMPORTANT:
-    # Plotly may not show bars where Start = Finish.
-    # So for display only, force every task bar to have at least 1 visible day.
-    same_day_mask = df["Plot_Start"] >= df["Plot_Finish"]
-    df.loc[same_day_mask, "Plot_Finish"] = df.loc[same_day_mask, "Plot_Start"] + pd.Timedelta(days=1)
+    # Make finish date inclusive
+    valid_plot_mask = df["Has_Valid_Dates"]
+    df.loc[valid_plot_mask, "Plot_Finish"] = (
+        df.loc[valid_plot_mask, "Plot_Finish"] + pd.Timedelta(days=1)
+    )
 
-    # Display text
+    # Prevent zero-width bars
+    same_day_mask = df["Plot_Start"] >= df["Plot_Finish"]
+    df.loc[same_day_mask, "Plot_Finish"] = (
+        df.loc[same_day_mask, "Plot_Start"] + pd.Timedelta(days=1)
+    )
+
     df["Display_Task"] = df["Project"] + " : " + df["Task"]
 
-    # Unique y-axis row key so duplicate task names do not collapse
+    # Unique y-axis key so duplicate tasks do not collapse
     df["Row_Key"] = (
         df["Original_Row_No"].astype(str)
         + " | "
@@ -174,20 +165,339 @@ def load_and_clean_data(file):
     df["Date_Status"] = np.where(
         df["Has_Valid_Dates"],
         "Valid dates",
-        "Missing / invalid dates"
+        "Missing / invalid dates",
     )
 
     df["Color_Group"] = np.where(
         df["Has_Valid_Dates"],
         df["Task"],
-        "Missing / invalid dates"
+        "Missing / invalid dates",
     )
 
-    df["Duration_Days"] = (
-        df["Plot_Finish"] - df["Plot_Start"]
-    ).dt.days
+    df["Duration_Days"] = np.where(
+        df["Has_Valid_Dates"],
+        (df["Finish"] - df["Start"]).dt.days + 1,
+        np.nan,
+    )
 
     return df.reset_index(drop=True)
+
+
+# =========================
+# PDF HELPERS
+# =========================
+def safe_text(value):
+    if pd.isna(value):
+        return ""
+    return str(value).replace("&amp;", "&").strip()
+
+
+def draw_wrapped_text(c, text, x, y, max_width, font_name, font_size, max_lines=2):
+    text = safe_text(text)
+
+    if text == "":
+        return
+
+    words = text.split()
+    lines = []
+    current = ""
+
+    for word in words:
+        test = word if current == "" else current + " " + word
+
+        if stringWidth(test, font_name, font_size) <= max_width:
+            current = test
+        else:
+            if current:
+                lines.append(current)
+            current = word
+
+    if current:
+        lines.append(current)
+
+    if len(lines) > max_lines:
+        lines = lines[:max_lines]
+
+        if len(lines[-1]) > 3:
+            lines[-1] = lines[-1][:-3] + "..."
+
+    line_height = font_size + 3
+
+    for i, line in enumerate(lines):
+        c.drawString(x, y - i * line_height, line)
+
+
+def hex_to_reportlab_color(hex_code, fallback="#6699cc"):
+    try:
+        return colors.HexColor(hex_code)
+    except Exception:
+        return colors.HexColor(fallback)
+
+
+def generate_color_map(tasks):
+    palette = [
+        "#4e79a7",
+        "#59a14f",
+        "#f28e2b",
+        "#e15759",
+        "#76b7b2",
+        "#edc948",
+        "#b07aa1",
+        "#ff9da7",
+        "#9c755f",
+        "#bab0ab",
+        "#86bc86",
+        "#6b9ac4",
+        "#d37295",
+        "#fabfd2",
+        "#b6992d",
+        "#499894",
+    ]
+
+    color_map = {}
+
+    for i, task in enumerate(tasks):
+        color_map[task] = palette[i % len(palette)]
+
+    color_map["Missing / invalid dates"] = "#9e9e9e"
+
+    return color_map
+
+
+def make_timeline_pdf(
+    df_view,
+    chart_title,
+    pdf_width=2200,
+    row_height=28,
+    left_margin=320,
+    right_margin=60,
+    top_margin=100,
+    bottom_margin=70,
+):
+    if not REPORTLAB_AVAILABLE:
+        raise RuntimeError("reportlab is not installed. Add reportlab to requirements.txt.")
+
+    df_pdf = df_view.copy().reset_index(drop=True)
+
+    if df_pdf.empty:
+        raise ValueError("No tasks available to export.")
+
+    min_date = df_pdf["Plot_Start"].min().replace(day=1)
+    max_date = df_pdf["Plot_Finish"].max()
+
+    if pd.isna(min_date) or pd.isna(max_date):
+        min_date = pd.Timestamp.today().replace(day=1)
+        max_date = min_date + pd.DateOffset(months=1)
+
+    month_starts = pd.date_range(start=min_date, end=max_date, freq="MS")
+
+    chart_left = left_margin
+    chart_right = pdf_width - right_margin
+    chart_width = chart_right - chart_left
+
+    header_height = 60
+    task_count = len(df_pdf)
+
+    pdf_height = top_margin + header_height + task_count * row_height + bottom_margin
+    pdf_height = max(pdf_height, 650)
+
+    max_page_size = 14400
+    pdf_width = min(pdf_width, max_page_size)
+    pdf_height = min(pdf_height, max_page_size)
+
+    buffer = io.BytesIO()
+    c = canvas.Canvas(buffer, pagesize=(pdf_width, pdf_height))
+
+    c.setFillColor(colors.HexColor("#ffffff"))
+    c.rect(0, 0, pdf_width, pdf_height, fill=1, stroke=0)
+
+    # Title
+    c.setFillColor(colors.black)
+    c.setFont("Helvetica-Bold", 18)
+    c.drawString(40, pdf_height - 40, safe_text(chart_title))
+
+    c.setFont("Helvetica", 9)
+    exported_time = datetime.now(ZoneInfo("Asia/Singapore")).strftime("%d %b %Y, %I:%M %p SGT")
+    c.drawString(40, pdf_height - 58, f"Exported: {exported_time}")
+
+    total_days = max((max_date - min_date).days, 1)
+
+    def date_to_x(dt):
+        dt = pd.Timestamp(dt)
+        return chart_left + ((dt - min_date).days / total_days) * chart_width
+
+    chart_top = pdf_height - top_margin - header_height
+    chart_bottom = chart_top - task_count * row_height
+
+    month_map = {
+        1: "J",
+        2: "F",
+        3: "M",
+        4: "A",
+        5: "M",
+        6: "J",
+        7: "J",
+        8: "A",
+        9: "S",
+        10: "O",
+        11: "N",
+        12: "D",
+    }
+
+    # Month grid
+    c.setFont("Helvetica-Bold", 8)
+
+    for dt in month_starts:
+        x = date_to_x(dt)
+
+        if dt.month == 1:
+            c.setStrokeColor(colors.black)
+            c.setLineWidth(1.4)
+        else:
+            c.setStrokeColor(colors.HexColor("#dddddd"))
+            c.setLineWidth(0.5)
+
+        c.line(x, chart_bottom, x, chart_top + 35)
+
+        c.setFillColor(colors.black)
+        c.drawCentredString(x + 8, chart_top + 18, month_map[dt.month])
+
+        if dt.month == 1 or dt == month_starts[0]:
+            c.setFont("Helvetica-Bold", 8)
+            c.drawCentredString(x + 18, chart_top + 32, str(dt.year))
+
+    # Today line
+    today = pd.Timestamp(datetime.now(ZoneInfo("Asia/Singapore")).date())
+
+    if min_date <= today <= max_date:
+        today_x = date_to_x(today)
+        c.setStrokeColor(colors.red)
+        c.setLineWidth(1.5)
+        c.setDash(4, 3)
+        c.line(today_x, chart_bottom, today_x, chart_top + 40)
+        c.setDash()
+
+        c.setFillColor(colors.red)
+        c.setFont("Helvetica-Bold", 8)
+        c.drawCentredString(today_x, chart_top + 45, "TODAY")
+
+    color_map = generate_color_map(df_pdf["Color_Group"].unique().tolist())
+
+    # Project background bands
+    background_colours = [
+        colors.Color(100 / 255, 149 / 255, 237 / 255, alpha=0.12),
+        colors.Color(143 / 255, 188 / 255, 143 / 255, alpha=0.16),
+        colors.Color(244 / 255, 164 / 255, 96 / 255, alpha=0.15),
+        colors.Color(216 / 255, 191 / 255, 216 / 255, alpha=0.18),
+        colors.Color(255 / 255, 160 / 255, 122 / 255, alpha=0.15),
+    ]
+
+    projects = df_pdf["Project"].dropna().unique().tolist()
+
+    for p_i, project in enumerate(projects):
+        project_indexes = df_pdf.index[df_pdf["Project"] == project].tolist()
+
+        if not project_indexes:
+            continue
+
+        y_top = chart_top - project_indexes[0] * row_height
+        y_bottom = chart_top - (project_indexes[-1] + 1) * row_height
+
+        c.setFillColor(background_colours[p_i % len(background_colours)])
+        c.rect(0, y_bottom, pdf_width, y_top - y_bottom, fill=1, stroke=0)
+
+    bar_height = max(6, row_height * 0.48)
+    label_font_size = 7 if task_count > 70 else 8
+
+    for idx, row in df_pdf.iterrows():
+        row_top = chart_top - idx * row_height
+        row_mid = row_top - row_height / 2
+        row_bottom = row_top - row_height
+
+        # Row separator
+        c.setStrokeColor(colors.HexColor("#eeeeee"))
+        c.setLineWidth(0.4)
+        c.line(40, row_bottom, pdf_width - 40, row_bottom)
+
+        # Task label
+        c.setFillColor(colors.black)
+        c.setFont("Helvetica", label_font_size)
+
+        draw_wrapped_text(
+            c,
+            row["Display_Task"],
+            40,
+            row_mid + 3,
+            left_margin - 55,
+            "Helvetica",
+            label_font_size,
+            max_lines=2,
+        )
+
+        # Timeline bar
+        start = pd.Timestamp(row["Plot_Start"])
+        finish = pd.Timestamp(row["Plot_Finish"])
+
+        x1 = date_to_x(start)
+        x2 = date_to_x(finish)
+
+        if x2 <= x1:
+            x2 = x1 + 2
+
+        bar_width = max(x2 - x1, 2)
+
+        color_key = safe_text(row["Color_Group"])
+        bar_color = hex_to_reportlab_color(color_map.get(color_key, "#6699cc"))
+
+        if not bool(row["Has_Valid_Dates"]):
+            bar_color = colors.HexColor("#9e9e9e")
+
+        c.setFillColor(bar_color)
+        c.setStrokeColor(bar_color)
+        c.roundRect(
+            x1,
+            row_mid - bar_height / 2,
+            bar_width,
+            bar_height,
+            radius=2,
+            fill=1,
+            stroke=0,
+        )
+
+    # Border around chart
+    c.setStrokeColor(colors.HexColor("#aaaaaa"))
+    c.setLineWidth(0.8)
+    c.rect(chart_left, chart_bottom, chart_width, task_count * row_height, fill=0, stroke=1)
+
+    # Legend
+    legend_y = 35
+    legend_x = 40
+    c.setFont("Helvetica-Bold", 8)
+    c.setFillColor(colors.black)
+    c.drawString(legend_x, legend_y + 14, "Legend:")
+
+    c.setFont("Helvetica", 7)
+    legend_items = list(color_map.items())[:12]
+
+    x_pos = legend_x + 50
+
+    for label, hex_color in legend_items:
+        c.setFillColor(hex_to_reportlab_color(hex_color))
+        c.rect(x_pos, legend_y + 8, 8, 8, fill=1, stroke=0)
+
+        c.setFillColor(colors.black)
+        c.drawString(x_pos + 12, legend_y + 8, safe_text(label)[:22])
+
+        x_pos += 140
+
+        if x_pos > pdf_width - 180:
+            break
+
+    c.showPage()
+    c.save()
+    buffer.seek(0)
+
+    return buffer.getvalue()
 
 
 # =========================
@@ -210,12 +520,41 @@ if uploaded_file is not None:
 
         chart_title = st.sidebar.text_input(
             "Chart Title",
-            value="Master Department Schedule: Grand View"
+            value="Master Department Schedule: Grand View",
         )
 
         show_undated_tasks = st.sidebar.checkbox(
             "Show tasks with missing / invalid dates",
-            value=True
+            value=True,
+        )
+
+        # =========================
+        # PDF SETTINGS
+        # =========================
+        st.sidebar.header("PDF Settings")
+
+        pdf_width = st.sidebar.slider(
+            "PDF Width",
+            min_value=1000,
+            max_value=5000,
+            value=2200,
+            step=100,
+        )
+
+        pdf_row_height = st.sidebar.slider(
+            "PDF Row Height",
+            min_value=18,
+            max_value=50,
+            value=28,
+            step=1,
+        )
+
+        pdf_left_margin = st.sidebar.slider(
+            "PDF Task Label Width",
+            min_value=180,
+            max_value=600,
+            value=320,
+            step=20,
         )
 
         # =========================
@@ -235,7 +574,7 @@ if uploaded_file is not None:
             checked = st.sidebar.checkbox(
                 project,
                 value=select_all,
-                key=f"project_checkbox_{project}"
+                key=f"project_checkbox_{project}",
             )
 
             if checked:
@@ -278,10 +617,11 @@ if uploaded_file is not None:
                         "Finish_Raw",
                         "Start",
                         "Finish",
-                        "Date_Status"
+                        "Date_Status",
+                        "Duration_Days",
                     ]
                 ],
-                use_container_width=True
+                use_container_width=True,
             )
 
         # =========================
@@ -289,7 +629,7 @@ if uploaded_file is not None:
         # =========================
         label_option = st.sidebar.selectbox(
             "Bar Labels",
-            ["None", "Task", "Project", "Task + Project", "Date Status"]
+            ["None", "Task", "Project", "Task + Project", "Date Status"],
         )
 
         if label_option == "Task":
@@ -325,16 +665,15 @@ if uploaded_file is not None:
                 "Plot_Finish": "|%B %d, %Y",
                 "Date_Status": True,
                 "Duration_Days": True,
-            }
+            },
         )
 
         if label_option != "None":
             fig.update_traces(
                 textposition="inside",
-                insidetextanchor="middle"
+                insidetextanchor="middle",
             )
 
-        # Preserve original uploaded row order
         unique_rows = df_view["Row_Key"].tolist()
         tick_text = df_view["Display_Task"].tolist()
 
@@ -346,7 +685,7 @@ if uploaded_file is not None:
             tickmode="array",
             tickvals=unique_rows,
             ticktext=tick_text,
-            tickfont=dict(color="black", size=13)
+            tickfont=dict(color="black", size=13),
         )
 
         # =========================
@@ -369,7 +708,7 @@ if uploaded_file is not None:
             9: "S",
             10: "O",
             11: "N",
-            12: "D"
+            12: "D",
         }
 
         tick_vals = []
@@ -396,7 +735,7 @@ if uploaded_file is not None:
             "rgba(216,191,216,0.30)",
             "rgba(255,160,122,0.25)",
             "rgba(176,196,222,0.25)",
-            "rgba(152,251,152,0.20)"
+            "rgba(152,251,152,0.20)",
         ]
 
         visible_projects = df_view["Project"].dropna().unique().tolist()
@@ -413,7 +752,7 @@ if uploaded_file is not None:
                     y1=last_index + 0.5,
                     fillcolor=background_colours[i % len(background_colours)],
                     layer="below",
-                    line_width=0
+                    line_width=0,
                 )
 
         # Invisible scatter to force top x-axis
@@ -424,12 +763,15 @@ if uploaded_file is not None:
             mode="markers",
             marker=dict(color="rgba(0,0,0,0)"),
             showlegend=False,
-            hoverinfo="skip"
+            hoverinfo="skip",
         )
 
         # =========================
-        # LAYOUT
+        # FIXED DYNAMIC HEIGHT
+        # This removes the big gap between top axis and first bar.
         # =========================
+        chart_height = max(280, len(unique_rows) * 34 + 160)
+
         fig.update_layout(
             xaxis=dict(
                 tickmode="array",
@@ -438,7 +780,7 @@ if uploaded_file is not None:
                 tickangle=0,
                 showgrid=True,
                 gridcolor="rgba(0,0,0,0.1)",
-                gridwidth=1
+                gridwidth=1,
             ),
             xaxis2=dict(
                 tickmode="array",
@@ -448,11 +790,11 @@ if uploaded_file is not None:
                 showgrid=False,
                 overlaying="x",
                 side="top",
-                matches="x"
+                matches="x",
             ),
             showlegend=True,
-            height=max(650, len(unique_rows) * 32),
-            margin=dict(t=160, b=50, l=10, r=50)
+            height=chart_height,
+            margin=dict(t=90, b=40, l=10, r=50),
         )
 
         # =========================
@@ -464,13 +806,13 @@ if uploaded_file is not None:
                     x=dt,
                     line_width=2,
                     line_color="black",
-                    layer="below"
+                    layer="below",
                 )
 
         # =========================
         # TODAY LINE
         # =========================
-        today = pd.Timestamp.now().normalize()
+        today = pd.Timestamp(datetime.now(ZoneInfo("Asia/Singapore")).date())
 
         fig.add_vline(
             x=today,
@@ -480,8 +822,8 @@ if uploaded_file is not None:
             annotation_text="📍 TODAY",
             annotation_position="top",
             annotation_font_color="red",
-            annotation_yshift=40,
-            layer="above"
+            annotation_yshift=25,
+            layer="above",
         )
 
         # =========================
@@ -494,11 +836,48 @@ if uploaded_file is not None:
                 "toImageButtonOptions": {
                     "format": "png",
                     "filename": "Master_Timeline_Visual",
-                    "scale": 2
+                    "scale": 2,
                 },
-                "displayModeBar": True
-            }
+                "displayModeBar": True,
+            },
         )
+
+        # =========================
+        # REPORTLAB PDF DOWNLOAD
+        # =========================
+        st.markdown("### 📥 Download Full Timeline")
+
+        if REPORTLAB_AVAILABLE:
+            try:
+                pdf_bytes = make_timeline_pdf(
+                    df_view=df_view,
+                    chart_title=chart_title,
+                    pdf_width=int(pdf_width),
+                    row_height=int(pdf_row_height),
+                    left_margin=int(pdf_left_margin),
+                )
+
+                file_stamp = datetime.now(ZoneInfo("Asia/Singapore")).strftime("%Y%m%d_%H%M")
+
+                st.download_button(
+                    label="Download Timeline as PDF",
+                    data=pdf_bytes,
+                    file_name=f"Master_Timeline_Full_{file_stamp}.pdf",
+                    mime="application/pdf",
+                    use_container_width=True,
+                )
+
+                st.caption(
+                    "This PDF is generated using ReportLab, so it does not need Kaleido or Chrome."
+                )
+
+            except Exception as e:
+                st.error(f"Unable to generate PDF: {e}")
+
+        else:
+            st.error(
+                "PDF download needs the reportlab package. Add `reportlab` to requirements.txt, then reboot the Streamlit app."
+            )
 
     except Exception as e:
         st.error(f"Error processing data: {e}")
